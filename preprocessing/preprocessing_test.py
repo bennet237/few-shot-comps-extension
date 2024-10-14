@@ -3,6 +3,12 @@
 # crops the image, rotates the image so the face is upright, and
 # resizes the image to be 224x224
 
+# apt install cmake, need admin permissions on linux machine for this
+# pip install dlib
+# pip install opencv-python
+# pip install matplotlib
+# pip install numpy
+
 import os
 import dlib
 import cv2
