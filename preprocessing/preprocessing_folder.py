@@ -22,7 +22,7 @@ import numpy as np
 #       - Image 3.jpg
 #       - Image 4.jpg
 
-input_folder_path = '/Users/luke/Downloads/TD_RGB_E_Set1' # modify for approriate path name
+input_folder_path = '/home/drakel2/Desktop/Tufts Faces/Set4' # modify for approriate path name, make sure it doesn't end in a slash.
 
 
 # Function to preprocess an image
@@ -61,7 +61,8 @@ def preprocess_image(image_path):
     rotated_cropped_face = rotated_image[y:y+h, x:x+w]
 
     # Resize the cropped face
-    target_size = (224, 224)  # You can modify the target size as needed
+    # Potentially look into this to make sure that facial distortion through stretch is not happening
+    target_size = (224, 224)  # You can modify the target size as needed. Pretrained models used 224x224
     resized_face = cv2.resize(rotated_cropped_face, target_size)
 
     return resized_face

@@ -3,17 +3,37 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.applications import ResNet50
 import tensorflow.keras.backend as K
 import numpy as np
+import csv
+
+# read csv file
+# first column is image dataset, second column is labels dataset
+
+csv_path = "/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed/labels_dataset.csv"
+
+images_dataset = []
+labels_dataset = []
+
+with open(csv_path, mode='r') as file:
+    csv_reader = csv.reader(file)
+    next(csv_reader) # skips the first line of the csv, as this is the column headers
+
+    # Populates the image_dataset and labels_dataset from the premade CSV file
+    for row in csv_reader:
+        images_dataset.append(row[0])
+        labels_dataset.append(row[1])
+
 
 def create_model():
     # Load ResNet50 as the base model, excluding top layers
-    base_model = ResNet50(include_top=False, weights='imagenet', input_shape=(64, 64, 3))
-    
+    # base_model = ResNet50(include_top=False, weights='imagenet', input_shape=(64, 64, 3))
+    base_model = ResNet50(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
+
     # Freeze base model layers to retain pre-trained weights
     for layer in base_model.layers:
         layer.trainable = False
 
     # Input layer for grayscale images
-    inputs = Input(shape=(64, 64, 1))
+    inputs = Input(shape=(224, 224, 1))
     x = tf.keras.layers.Conv2D(3, (1, 1))(inputs)  # Convert grayscale to 3-channel input
     x = base_model(x)
 
@@ -72,8 +92,8 @@ def generate_test_image_pairs(images_dataset, labels_dataset, image):
 
 # Create the feature extractor model and generate feature vectors for both images
 feature_extractor = create_model()
-imgA = Input(shape=(64, 64, 1))
-imgB = Input(shape=(64, 64, 1))
+imgA = Input(shape=(224, 224, 1))
+imgB = Input(shape=(224, 224, 1))
 featA = feature_extractor(imgA)
 featB = feature_extractor(imgB)
 

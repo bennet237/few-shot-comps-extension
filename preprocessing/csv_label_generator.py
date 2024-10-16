@@ -14,7 +14,7 @@
 import os
 import csv
 
-input_folder_path = '/Users/luke/Downloads/TD_RGB_E_Set1_preprocessed' # modify for approriate path name
+input_folder_path = '/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed' # modify for approriate path name
 
 def create_labels_dataset(input_folder_path, output_csv_path):
     # Open the CSV file for writing
