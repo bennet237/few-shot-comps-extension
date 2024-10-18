@@ -26,7 +26,6 @@ with open(csv_path, mode='r') as file:
 print(images_dataset)
 print(labels_dataset)
 
-
 def create_model():
     # Load ResNet50 as the base model, excluding top layers
     # base_model = ResNet50(include_top=False, weights='imagenet', input_shape=(64, 64, 3))
