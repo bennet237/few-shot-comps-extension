@@ -1,5 +1,4 @@
 import tensorflow as tf
-
 from tensorflow.keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
 from tensorflow.keras.models import Model
 from tensorflow.keras.applications import ResNet50
@@ -23,6 +22,10 @@ with open(csv_path, mode='r') as file:
     for row in csv_reader:
         images_dataset.append(row[0])
         labels_dataset.append(row[1])
+
+print(images_dataset)
+print(labels_dataset)
+
 
 def create_model():
     # Load ResNet50 as the base model, excluding top layers
@@ -114,6 +117,7 @@ model = Model(inputs=[imgA, imgB], outputs=outputs)
 model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
 
 # Model training
+# Fails here consistently
 images_pair, labels_pair = generate_train_image_pairs(images_dataset, labels_dataset)
 history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair[:],validation_split=0.1,batch_size=64,epochs=100)
 
