@@ -1,3 +1,5 @@
+import tensorflow as tf
+
 from tensorflow.keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
 from tensorflow.keras.models import Model
 from tensorflow.keras.applications import ResNet50
@@ -8,7 +10,7 @@ import csv
 # read csv file
 # first column is image dataset, second column is labels dataset
 
-csv_path = "/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed/labels_dataset.csv"
+csv_path = "/home/tefub/Downloads/Set1_preprocessed/Set1_preprocessed/labels_dataset.csv"
 
 images_dataset = []
 labels_dataset = []
@@ -21,7 +23,6 @@ with open(csv_path, mode='r') as file:
     for row in csv_reader:
         images_dataset.append(row[0])
         labels_dataset.append(row[1])
-
 
 def create_model():
     # Load ResNet50 as the base model, excluding top layers
@@ -53,16 +54,19 @@ def euclidean_distance(vectors):
 def generate_train_image_pairs(images_dataset, labels_dataset):
     # Group image indices by their labels
     unique_labels = np.unique(labels_dataset)
-    label_wise_indices = {label: [index for index, curr_label in enumerate(labels_dataset) if label == curr_label]
-                          for label in unique_labels}
-
+    label_wise_indices = dict()
+    for label in unique_labels:
+        label_wise_indices.setdefault(label,
+                                      [index for index, curr_label in enumerate(labels_dataset) if
+                                       label == curr_label])
+    
     pair_images = []
     pair_labels = []
 
     # Create positive and negative image pairs
     for index, image in enumerate(images_dataset):
         # Positive pair: same label
-        pos_indices = label_wise_indices[labels_dataset[index]]
+        pos_indices = label_wise_indices.get(labels_dataset[index])
         pos_image = images_dataset[np.random.choice(pos_indices)]
         pair_images.append((image, pos_image))
         pair_labels.append(1)
@@ -72,6 +76,8 @@ def generate_train_image_pairs(images_dataset, labels_dataset):
         neg_image = images_dataset[np.random.choice(neg_indices[0])]
         pair_images.append((image, neg_image))
         pair_labels.append(0)
+
+    return np.array(pair_images), np.array(pair_labels)
 
 def generate_test_image_pairs(images_dataset, labels_dataset, image):
     # Group image indices by labels
