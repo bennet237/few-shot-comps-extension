@@ -1,15 +1,16 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
-from tensorflow.keras.models import Model
+from tensorflow.python.keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
+from tensorflow.python.keras.models import Model
 from tensorflow.keras.applications import ResNet50
-import tensorflow.keras.backend as K
+import tensorflow.python.keras.backend as K
 import numpy as np
 import csv
+import os
+import cv2 # for image processing
 
 # read csv file
 # first column is image dataset, second column is labels dataset
-
-csv_path = "/home/tefub/Downloads/Set1_preprocessed/Set1_preprocessed/labels_dataset.csv"
+csv_path = "/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed/labels_dataset.csv"
 
 images_dataset = []
 labels_dataset = []
@@ -23,12 +24,17 @@ with open(csv_path, mode='r') as file:
         images_dataset.append(row[0])
         labels_dataset.append(row[1])
 
-print(images_dataset)
-print(labels_dataset)
+# print(images_dataset) # an array with all of the file paths to the JPG images
+# print(labels_dataset) # corresponding array which says which person (label) each image path belongs to
+
+# Loads the preprocesed images from the given filepath
+def load_image(image_path):
+    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE) # Read it in as grayscale, as that is what ML models work on
+    image = np.expand_dims(image, axis=-1)  # Add channel dimension for grayscale
+    return image
 
 def create_model():
     # Load ResNet50 as the base model, excluding top layers
-    # base_model = ResNet50(include_top=False, weights='imagenet', input_shape=(64, 64, 3))
     base_model = ResNet50(include_top=False, weights='imagenet', input_shape=(224, 224, 3))
 
     # Freeze base model layers to retain pre-trained weights
@@ -47,39 +53,41 @@ def create_model():
 
     return Model(inputs, x)
 
+
 # Compute the Euclidean distance between the two feature vectors
 def euclidean_distance(vectors):
     (featA, featB) = vectors
     sum_squared = K.sum(K.square(featA - featB), axis=1, keepdims=True)
     return K.sqrt(K.maximum(sum_squared, K.epsilon()))
 
+
 def generate_train_image_pairs(images_dataset, labels_dataset):
     # Group image indices by their labels
     unique_labels = np.unique(labels_dataset)
-    label_wise_indices = dict()
-    for label in unique_labels:
-        label_wise_indices.setdefault(label,
-                                      [index for index, curr_label in enumerate(labels_dataset) if
-                                       label == curr_label])
-    
+    label_wise_indices = {label: [i for i, lbl in enumerate(labels_dataset) if lbl == label] for label in unique_labels}
+
     pair_images = []
     pair_labels = []
 
-    # Create positive and negative image pairs
-    for index, image in enumerate(images_dataset):
-        # Positive pair: same label
-        pos_indices = label_wise_indices.get(labels_dataset[index])
-        pos_image = images_dataset[np.random.choice(pos_indices)]
+    for i, image_path in enumerate(images_dataset):
+        image = load_image(image_path)
+
+        # Positive pair, same person
+        pos_indices = label_wise_indices[labels_dataset[i]]
+        pos_image_path = images_dataset[np.random.choice(pos_indices)]
+        pos_image = load_image(pos_image_path)  # Load positive image
         pair_images.append((image, pos_image))
         pair_labels.append(1)
 
-        # Negative pair: different label
-        neg_indices = np.where(labels_dataset != labels_dataset[index])
-        neg_image = images_dataset[np.random.choice(neg_indices[0])]
+        # Negative pair, different people
+        neg_indices = np.where(labels_dataset != labels_dataset[i])[0]
+        neg_image_path = images_dataset[np.random.choice(neg_indices)]
+        neg_image = load_image(neg_image_path)  # Load negative image
         pair_images.append((image, neg_image))
         pair_labels.append(0)
 
     return np.array(pair_images), np.array(pair_labels)
+
 
 def generate_test_image_pairs(images_dataset, labels_dataset, image):
     # Group image indices by labels
@@ -113,31 +121,41 @@ outputs = Dense(1, activation="sigmoid")(distance)
 
 # Compile the Siamese model using binary cross-entropy
 model = Model(inputs=[imgA, imgB], outputs=outputs)
-model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy"])
+model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy", "precision", "recall"])
 
 # Model training
-# Fails here consistently
+# Fails here consistently, likely due to the cause that the images are not loaded.
 images_pair, labels_pair = generate_train_image_pairs(images_dataset, labels_dataset)
-history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair[:],validation_split=0.1,batch_size=64,epochs=100)
+history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair, validation_split=0.1, batch_size=64, epochs=100)
 
-# Select random test image and generate test pairs
-image = images_dataset[92] #?? 
-test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, image) 
+# Example: Test image pairs
+image = load_image(images_dataset[92])  # Load a specific image for testing
+test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, image)
 
+# Model Evaluation: Evaluate the model's performance
+test_loss, test_accuracy, test_precision, test_recall = model.evaluate([test_image_pairs[:, 0], test_image_pairs[:, 1]], test_label_pairs)
+
+print(f"Test Accuracy: {test_accuracy}")
+print(f"Test Precision: {test_precision}")
+print(f"Test Recall: {test_recall}")
+
+
+# CURRENTLY NOT WORKING, CAN FIX AND UNCOMMENT IN THE FUTURE
+# PRINT STATEMENTS DO NOTHING AT THE MOMENT...
 # Predict similarity for each test image pair
-threshold = 0.5
-predictions = []
-for index, pair in enumerate(test_image_pairs):
-    pair_image1 = np.expand_dims(pair[0], axis=-1)
-    pair_image1 = np.expand_dims(pair_image1, axis=0)
-    pair_image2 = np.expand_dims(pair[1], axis=-1)
-    pair_image2 = np.expand_dims(pair_image2, axis=0)
+# threshold = 0.5
+# predictions = []
+# for index, pair in enumerate(test_image_pairs):
+#     pair_image1 = np.expand_dims(pair[0], axis=-1)
+#     pair_image1 = np.expand_dims(pair_image1, axis=0)
+#     pair_image2 = np.expand_dims(pair[1], axis=-1)
+#     pair_image2 = np.expand_dims(pair_image2, axis=0)
     
-    prediction = model.predict([pair_image1, pair_image2])[0][0]  # Predict similarity score
-    predictions.append(prediction)
+#     prediction = model.predict([pair_image1, pair_image2])[0][0]  # Predict similarity score
+#     predictions.append(prediction)
     
-    # Determine if the pair is similar or not
-    if prediction > threshold:
-        print(f"Pair {index + 1}: Similar (Score: {prediction:.4f})")
-    else:
-        print(f"Pair {index + 1}: Not Similar (Score: {prediction:.4f})")
+#     # Determine if the pair is similar or not
+#     if prediction > threshold:
+#         print(f"Pair {index + 1}: Similar (Score: {prediction:.4f})")
+#     else:
+#         print(f"Pair {index + 1}: Not Similar (Score: {prediction:.4f})")
