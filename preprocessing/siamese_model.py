@@ -7,6 +7,7 @@ import numpy as np
 import csv
 import os
 import cv2 # for image processing "pip install opencv-python-headless"
+import random
 
 
 # read csv file
@@ -93,7 +94,7 @@ def generate_train_image_pairs(images_dataset, labels_dataset):
     return np.array(pair_images), np.array(pair_labels)
 
 
-def generate_test_image_pairs(images_dataset, labels_dataset, image):
+def generate_test_image_pairs(images_dataset, labels_dataset, test_images):
     # Group image indices by labels
     unique_labels = np.unique(labels_dataset)
     label_wise_indices = {label: [index for index, curr_label in enumerate(labels_dataset) if label == curr_label]
@@ -102,11 +103,16 @@ def generate_test_image_pairs(images_dataset, labels_dataset, image):
     pair_images = []
     pair_labels = []
 
-    # Create pairs with the test image and one image from each label group
-    for label, indices_for_label in label_wise_indices.items():
-        test_image = images_dataset[np.random.choice(indices_for_label)]
-        pair_images.append((image, test_image))
-        pair_labels.append(label)
+    # Loop over each test image
+    for test_image_path in test_images:
+        test_image = load_image(test_image_path) 
+
+        for label, indices_for_label in label_wise_indices.items():
+            # randomly select an image from the dataset that has the same label as the test image
+            dataset_image_path = images_dataset[np.random.choice(indices_for_label)]
+            dataset_image = load_image(dataset_image_path)
+            pair_images.append((test_image, dataset_image))
+            pair_labels.append(label)
 
     return np.array(pair_images), np.array(pair_labels)
 
@@ -133,8 +139,11 @@ images_pair, labels_pair = generate_train_image_pairs(images_dataset, labels_dat
 history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair, validation_split=0.1, batch_size=64, epochs=100)
 
 # Example: Test image pairs
-image = load_image(images_dataset[92])  # Load a specific image for testing
-test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, image)
+images_for_test = random.sample(images_dataset, 25)  # Load 25 images for testing
+test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, images_for_test)
+
+test_image_pairs = test_image_pairs.astype('float32') # fast fix, update later
+test_label_pairs = test_label_pairs.astype('float32') # fast fix, update later
 
 # Model Evaluation: Evaluate the model's performance
 test_loss, test_accuracy, test_precision, test_recall = model.evaluate([test_image_pairs[:, 0], test_image_pairs[:, 1]], test_label_pairs)
