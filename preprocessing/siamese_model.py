@@ -1,17 +1,19 @@
 import tensorflow as tf
-from tensorflow.python.keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
-from tensorflow.python.keras.models import Model
-from tensorflow.keras.applications import ResNet50
+from keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
+from keras.models import Model
+from keras.applications import ResNet50
 import tensorflow.python.keras.backend as K
 import numpy as np
 import csv
 import os
-import cv2 # for image processing
+import cv2 # for image processing "pip install opencv-python-headless"
+
 
 # read csv file
 # first column is image dataset, second column is labels dataset
-# csv_path = "/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed/labels_dataset.csv"
-csv_path = "/home/tefub/Downloads/Set1_preprocessed/labels_dataset.csv"
+image_directory = "TuftsFaces/Set1_preprocessed/" # update this with appropriate path
+
+csv_path = image_directory + "labels_dataset.csv" # should not have to change this
 
 images_dataset = []
 labels_dataset = []
@@ -22,7 +24,8 @@ with open(csv_path, mode='r') as file:
 
     # Populates the image_dataset and labels_dataset from the premade CSV file
     for row in csv_reader:
-        images_dataset.append(row[0])
+        correct_image_path = image_directory + row[0] # update the appropriate image path
+        images_dataset.append(correct_image_path)
         labels_dataset.append(row[1])
 
 # print(images_dataset) # an array with all of the file paths to the JPG images
@@ -115,7 +118,7 @@ featA = feature_extractor(imgA)
 featB = feature_extractor(imgB)
 
 # Lambda layer to calculate distance
-distance = Lambda(euclidean_distance)([featA, featB])
+distance = Lambda(euclidean_distance, output_shape=(1,))([featA, featB])
 
 # Output layer for similarity score
 outputs = Dense(1, activation="sigmoid")(distance)
