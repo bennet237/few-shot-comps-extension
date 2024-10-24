@@ -10,7 +10,8 @@ import cv2 # for image processing
 
 # read csv file
 # first column is image dataset, second column is labels dataset
-csv_path = "/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed/labels_dataset.csv"
+# csv_path = "/home/drakel2/Desktop/Tufts Faces/Set1_preprocessed/labels_dataset.csv"
+csv_path = "/home/tefub/Downloads/Set1_preprocessed/labels_dataset.csv"
 
 images_dataset = []
 labels_dataset = []
