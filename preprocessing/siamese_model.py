@@ -12,7 +12,7 @@ import random
 
 # read csv file
 # first column is image dataset, second column is labels dataset
-image_directory = "TuftsFaces/Set1_preprocessed/" # update this with appropriate path
+image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path
 
 csv_path = image_directory + "labels_dataset.csv" # should not have to change this
 
@@ -136,6 +136,7 @@ model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy",
 # Model training
 # Fails here consistently, likely due to the cause that the images are not loaded.
 images_pair, labels_pair = generate_train_image_pairs(images_dataset, labels_dataset)
+# Can change epochs later with appropriate amounts
 history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair, validation_split=0.1, batch_size=64, epochs=10)
 
 # Example: Test image pairs

@@ -14,7 +14,7 @@
 import os
 import csv
 
-input_folder_path = '/home/tefub/Downloads/Set1_preprocessed' # modify for approriate path name
+input_folder_path = '/home/drakel2/Desktop/Tufts Faces/Sets1-4_preprocessed' # modify for approriate path name
 
 def create_labels_dataset(input_folder_path, output_csv_path):
     # Open the CSV file for writing
@@ -37,7 +37,12 @@ def create_labels_dataset(input_folder_path, output_csv_path):
                     # Check if it's a .jpg file
                     if os.path.isfile(image_path) and image_name.lower().endswith('.jpg'):
                         # Write image path and associated person label to CSV
-                        writer.writerow([image_path, person_folder])
+                        # Modify the image path such that it takes only the string after the last two slashes, omitting outer folder path name
+                        first_slash_index = image_path.rfind('/')
+                        second_slash_index = image_path.rfind('/', 0, first_slash_index)
+                        modified_image_path = image_path[second_slash_index + 1:]
+                        # Write modified image name into CSV
+                        writer.writerow([modified_image_path, person_folder])
 
     print(f"Labels dataset saved to {output_csv_path}")
 
