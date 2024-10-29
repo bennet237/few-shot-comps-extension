@@ -136,14 +136,11 @@ model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy",
 # Model training
 # Fails here consistently, likely due to the cause that the images are not loaded.
 images_pair, labels_pair = generate_train_image_pairs(images_dataset, labels_dataset)
-history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair, validation_split=0.1, batch_size=64, epochs=100)
+history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair, validation_split=0.1, batch_size=64, epochs=10)
 
 # Example: Test image pairs
 images_for_test = random.sample(images_dataset, 25)  # Load 25 images for testing
 test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, images_for_test)
-
-test_image_pairs = test_image_pairs.astype('float32') # fast fix, update later
-test_label_pairs = test_label_pairs.astype('float32') # fast fix, update later
 
 # Model Evaluation: Evaluate the model's performance
 test_loss, test_accuracy, test_precision, test_recall = model.evaluate([test_image_pairs[:, 0], test_image_pairs[:, 1]], test_label_pairs)
