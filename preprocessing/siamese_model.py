@@ -1,4 +1,4 @@
-import tensorflow as tf
+import tensorflow as tf # to load tf, use "pip install tensorflow==2.17.1"
 from keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
 from keras.models import Model
 from keras.applications import ResNet50
