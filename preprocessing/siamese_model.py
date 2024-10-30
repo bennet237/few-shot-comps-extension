@@ -2,12 +2,12 @@ import tensorflow as tf # to load tf, use "pip install tensorflow==2.17.1"
 from keras.layers import Lambda, Input, Dense, GlobalAveragePooling2D, Dropout
 from keras.models import Model
 from keras.applications import ResNet50
+from sklearn.model_selection import train_test_split
 import tensorflow.python.keras.backend as K
 import numpy as np
 import csv
 import os
 import cv2 # for image processing "pip install opencv-python-headless"
-import random
 
 
 # read csv file
@@ -58,35 +58,41 @@ def create_model():
 
     return Model(inputs, x)
 
-
 # Compute the Euclidean distance between the two feature vectors
 def euclidean_distance(vectors):
     (featA, featB) = vectors
     sum_squared = K.sum(K.square(featA - featB), axis=1, keepdims=True)
     return K.sqrt(K.maximum(sum_squared, K.epsilon()))
 
+# Split dataset into 70% training and 30% testing
+train_images, test_images, train_labels, test_labels = train_test_split(
+    images_dataset,
+    labels_dataset, 
+    test_size=0.3,
+    random_state=42
+)
 
-def generate_train_image_pairs(images_dataset, labels_dataset):
+def generate_train_image_pairs(train_images, train_labels):
     # Group image indices by their labels
-    unique_labels = np.unique(labels_dataset)
-    label_wise_indices = {label: [i for i, lbl in enumerate(labels_dataset) if lbl == label] for label in unique_labels}
+    unique_labels = np.unique(train_labels)
+    label_wise_indices = {label: [i for i, lbl in enumerate(train_labels) if lbl == label] for label in unique_labels}
 
     pair_images = []
     pair_labels = []
 
-    for i, image_path in enumerate(images_dataset):
+    for i, image_path in enumerate(train_images):
         image = load_image(image_path)
 
         # Positive pair, same person
-        pos_indices = label_wise_indices[labels_dataset[i]]
-        pos_image_path = images_dataset[np.random.choice(pos_indices)]
+        pos_indices = label_wise_indices[train_labels[i]]
+        pos_image_path = train_images[np.random.choice(pos_indices)]
         pos_image = load_image(pos_image_path)  # Load positive image
         pair_images.append((image, pos_image))
         pair_labels.append(1)
 
         # Negative pair, different people
-        neg_indices = np.where(labels_dataset != labels_dataset[i])[0]
-        neg_image_path = images_dataset[np.random.choice(neg_indices)]
+        neg_indices = np.where(train_labels != train_labels[i])[0]
+        neg_image_path = train_images[np.random.choice(neg_indices)]
         neg_image = load_image(neg_image_path)  # Load negative image
         pair_images.append((image, neg_image))
         pair_labels.append(0)
@@ -94,25 +100,34 @@ def generate_train_image_pairs(images_dataset, labels_dataset):
     return np.array(pair_images), np.array(pair_labels)
 
 
-def generate_test_image_pairs(images_dataset, labels_dataset, test_images):
+def generate_test_image_pairs(images_dataset, labels_dataset, test_images, test_labels):
     # Group image indices by labels
-    unique_labels = np.unique(labels_dataset)
+    unique_labels = np.unique(test_labels)
     label_wise_indices = {label: [index for index, curr_label in enumerate(labels_dataset) if label == curr_label]
                           for label in unique_labels}
 
     pair_images = []
     pair_labels = []
 
-    # Loop over each test image
-    for test_image_path in test_images:
-        test_image = load_image(test_image_path) 
+    # Loop over each test image and label
+    for i, test_image_path in enumerate(test_images):
+        test_image = load_image(test_image_path)
+        test_label = test_labels[i]
 
-        for label, indices_for_label in label_wise_indices.items():
-            # randomly select an image from the dataset that has the same label as the test image
-            dataset_image_path = images_dataset[np.random.choice(indices_for_label)]
-            dataset_image = load_image(dataset_image_path)
-            pair_images.append((test_image, dataset_image))
-            pair_labels.append(label)
+        # Positive pair, same label in test set
+        pos_indices = label_wise_indices[test_label]
+        pos_image_path = images_dataset[np.random.choice(pos_indices)]
+        pos_image = load_image(pos_image_path)
+        pair_images.append((test_image, pos_image))
+        pair_labels.append(1)  # Similarity label for positive pair
+
+        # Negative pair, different label
+        neg_label = np.random.choice([label for label in unique_labels if label != test_label])
+        neg_indices = label_wise_indices[neg_label]
+        neg_image_path = images_dataset[np.random.choice(neg_indices)]
+        neg_image = load_image(neg_image_path)
+        pair_images.append((test_image, neg_image))
+        pair_labels.append(0)  # Dissimilarity label for negative pair
 
     return np.array(pair_images), np.array(pair_labels)
 
@@ -139,8 +154,7 @@ images_pair, labels_pair = generate_train_image_pairs(images_dataset, labels_dat
 history = model.fit([images_pair[:, 0], images_pair[:, 1]], labels_pair, validation_split=0.1, batch_size=64, epochs=10)
 
 # Example: Test image pairs
-images_for_test = random.sample(images_dataset, 25)  # Load 25 images for testing
-test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, images_for_test)
+test_image_pairs, test_label_pairs = generate_test_image_pairs(images_dataset, labels_dataset, test_images, test_labels)
 
 # Model Evaluation: Evaluate the model's performance
 test_loss, test_accuracy, test_precision, test_recall = model.evaluate([test_image_pairs[:, 0], test_image_pairs[:, 1]], test_label_pairs)
