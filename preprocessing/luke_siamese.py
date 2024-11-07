@@ -5,14 +5,10 @@
 # docker run --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 -it -v $(pwd):/my-repo --rm nvcr.io/nvidia/tensorflow:23.10-tf2-py3
 # cd /my-repo/preprocessing
 # pip install tensorflow==2.17.1
-
-# pip install tensorflow-addons
-
 # pip install opencv-python-headless
 # python luke_siamese.py
 
 import tensorflow as tf
-import tensorflow_addons as tfa # pip install tensorflow-addons
 import numpy as np
 import csv
 from tensorflow.keras.applications import ResNet50
@@ -140,34 +136,6 @@ def create_base_network():
     x = Dense(512)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.ReLU()(x)
-
-    # FROZE CODE SO IT CAN RUN, COULD LOOK INTO THIS IN THE FUTURE
-    # TOO COMPLEX OF A BASE NETWORK, UNNECESSARY CONSIDERING RESNET IS PERFORMING FEATURE EXTRACTION
-
-    # Unfreeze the last few blocks of ResNet50
-    # ResNet50 has 5 blocks, let's unfreeze the last 2 blocks
-    # for layer in base_model.layers:
-    #     if 'conv5' in layer.name or 'bn5' in layer.name:  # Last block
-    #         layer.trainable = True
-    #     if 'conv4' in layer.name or 'bn4' in layer.name:  # Second-to-last block
-    #         layer.trainable = True
-    
-    # # First dense block
-    # x = Dense(1024)(x) # 1024 neurons
-    # x = tf.keras.layers.BatchNormalization()(x) # normalizes activations of neurons
-    # x = tf.keras.layers.ReLU()(x) # activation function
-    # x = tf.keras.layers.Dropout(0.3)(x) # randomly drops 30% of connections to prevent overfitting, helps generalization
-    
-    # # Second dense block
-    # x = Dense(512)(x)
-    # x = tf.keras.layers.BatchNormalization()(x)
-    # x = tf.keras.layers.ReLU()(x)
-    # x = tf.keras.layers.Dropout(0.3)(x)
-    
-    # # Final dense block
-    # x = Dense(256)(x)
-    # x = tf.keras.layers.BatchNormalization()(x)
-    # x = tf.keras.layers.ReLU()(x)
     
     return Model(inputs=base_model.input, outputs=x)
 
@@ -178,16 +146,9 @@ def euclidean_distance(vectors):
     x, y = vectors
     return tf.sqrt(tf.maximum(tf.reduce_sum(tf.square(x - y), axis=1, keepdims=True), 1e-7))
 
-# could implement the official TF contrastive_loss function which would be as follows
-    # import tensorflow_addons as tfa # pip install tensorflow-addons
 
-    # model.compile(
-    #     loss=tfa.losses.ContrastiveLoss(margin=1.0),
-    #     optimizer=Adam(),
-    #     metrics=['accuracy']
-    # )
-
-
+# need a custom contrastive loss function, as old TF contrastive_loss builtin function was discontinued and doesn't
+# work on the version of TF that we are using.
 def contrastive_loss(margin=1.0): # Could change the val in the future, was 2.0 before
     """Contrastive loss function with margin"""
     def loss(y_true, y_pred):
@@ -208,7 +169,7 @@ def contrastive_loss(margin=1.0): # Could change the val in the future, was 2.0 
         # need to minimize distances for the same people and maximize differences between different people
         
         # Return mean loss
-        return tf.reduce_mean(positive_loss + negative_loss) / 2 # may be overkill here, as it should be a double already
+        return tf.reduce_mean(positive_loss + negative_loss) / 2 # reduce_mean be overkill here, as it should be a double already
 
     return loss
 
@@ -225,6 +186,7 @@ def create_siamese_network():
     processed_b = base_network(input_b)
     
     # L2 normalize the embeddings
+    # Not sure what this means, but models I've looked at include this
     processed_a = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_a)
     processed_b = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_b)
     
@@ -245,7 +207,8 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
         test_size=0.2,
         shuffle=True,
         random_state=42 # change this val for seeds
-    )
+    )   # even though a random seed is here, generate pairs still operates randomly
+        # may consider in the future implementing a seed into that function if necessary... (probably have to for comparative accuracy)
     
     train_paths = [image_paths[i] for i in train_idx]
     train_identities = [identities[i] for i in train_idx]
@@ -262,11 +225,6 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
         optimizer=Adam(learning_rate=learning_rate), # will likely still have to use learning rate decay, not built in...
         metrics=["accuracy", "precision", "recall"]
     )
-    # model.compile(
-    #     loss=tfa.losses.ContrastiveLoss(margin=1.0),
-    #     optimizer=Adam(),
-    #     metrics=["accuracy", "precision", "recall"]
-    # )
 
     # contrastive loss seems to be better than binary-cross entropy for this task of computing image distance
     # model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy", "precision", "recall"])
@@ -274,38 +232,23 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
     train_labels = np.array(train_labels, dtype=np.float32)
     test_labels = np.array(test_labels, dtype=np.float32)
     
+    # separates first and second images from each pair, then loads and preprocesses them
     train_pairs_0 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 0]])
     train_pairs_1 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 1]])
     test_pairs_0 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 0]])
     test_pairs_1 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 1]])
-    
-    # Learning rate schedule with warmup
-    initial_learning_rate = learning_rate
-    warmup_epochs = 2
-    total_steps = epochs * (len(train_pairs) // batch_size)
-    warmup_steps = warmup_epochs * (len(train_pairs) // batch_size)
-    
-    def warmup_cosine_decay_schedule(step): # adam has its own function, which may be of more use... see how to use this.
-        # Warmup phase
-        if step < warmup_steps:
-            return initial_learning_rate * (step / warmup_steps)
-        # Cosine decay phase
-        progress = (step - warmup_steps) / (total_steps - warmup_steps)
-        return initial_learning_rate * 0.5 * (1 + tf.cos(tf.constant(np.pi) * progress))
-    
-    callbacks = [
-        # Custom learning rate scheduler
-        tf.keras.callbacks.LearningRateScheduler(warmup_cosine_decay_schedule),
-        tf.keras.callbacks.TensorBoard(log_dir='./logs', histogram_freq=1)
-    ]
+
+    # callbacks = [
+    #     tf.keras.callbacks.TensorBoard(log_dir='./logs', histogram_freq=1),
+    # ]
     
     history = model.fit( # look into model.fit, model.compile, and model.predict
         [train_pairs_0, train_pairs_1],
         train_labels,
         validation_data=([test_pairs_0, test_pairs_1], test_labels),
         batch_size=batch_size,
-        epochs=epochs,
-        callbacks=callbacks
+        epochs=epochs
+        # callbacks=callbacks
     )
     
     return model, history
@@ -321,36 +264,154 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
 #     # Save the model
 #     # model.save('siamese_face_verification.h5')
 
-def analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels, threshold=1.0):
-    """
-    Analyze model predictions and create visualizations to understand model behavior
-    """
-    # Get model predictions (distances)
-    distances = model.predict([test_pairs_0, test_pairs_1])
+# def analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels, threshold=1.0):
+#     """
+#     Analyze model predictions and create visualizations to understand model behavior
+#     """
+#     # Get model predictions (distances)
+#     distances = model.predict([test_pairs_0, test_pairs_1])
     
-    # Convert distances to binary predictions using threshold
+#     # Convert distances to binary predictions using threshold
+#     predictions = (distances < threshold).astype(int)
+    
+#     # Calculate confusion matrix
+#     cm = confusion_matrix(test_labels, predictions) # not sure how this is used
+    
+#     # Create detailed classification report
+#     report = classification_report(test_labels, predictions, output_dict=True)
+    
+#     # Print statistics
+#     print("\nModel Statistics:")
+#     print(f"Average distance for same person pairs (Class 1): {distances[test_labels == 1].mean():.4f}")
+#     print(f"Average distance for different person pairs (Class 0): {distances[test_labels == 0].mean():.4f}")
+#     print(f"\nClassification Report:\n")
+#     for label, metrics in report.items():
+#         if label in ['0', '1']:
+#             print(f"Class {label}:")
+#             print(f"  Precision: {metrics['precision']:.4f}")
+#             print(f"  Recall: {metrics['recall']:.4f}")
+#             print(f"  F1-score: {metrics['f1-score']:.4f}")
+#             # print(f"  Accuracy: {metrics['accuracy']:.4f}") # may not work. we will see.
+    
+#     return distances, predictions, report
+
+def analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels, threshold=0.30, bins=20):
+    """
+    Analyze model predictions with text-based visualizations
+    """
+    # Get model predictions
+    distances = model.predict([test_pairs_0, test_pairs_1])
     predictions = (distances < threshold).astype(int)
     
     # Calculate confusion matrix
-    cm = confusion_matrix(test_labels, predictions) # not sure how this is used
+    cm = confusion_matrix(test_labels, predictions)
     
-    # Create detailed classification report
+    print("\nConfusion Matrix:")
+    print("-----------------")
+    print(f"                 Predicted")
+    print(f"                 Different  Same")
+    print(f"Actual Different    {cm[0,0]:<8d} {cm[0,1]:<8d}")
+    print(f"      Same         {cm[1,0]:<8d} {cm[1,1]:<8d}")
+    
+    # Separate distances by class
+    same_distances = distances[test_labels == 1].flatten()
+    diff_distances = distances[test_labels == 0].flatten()
+    
+    # Create histogram data
+    def create_ascii_histogram(data, bins=20, width=50):
+        """Create ASCII histogram data"""
+        hist, bin_edges = np.histogram(data, bins=bins)
+        max_count = max(hist)
+        
+        # Scale to desired width
+        scaled_hist = ((hist * width) / max_count).astype(int)
+        
+        return hist, scaled_hist, bin_edges
+    
+    # Generate histogram data
+    same_hist, same_scaled, same_edges = create_ascii_histogram(same_distances, bins)
+    diff_hist, diff_scaled, diff_edges = create_ascii_histogram(diff_distances, bins)
+    
+    print("\nDistance Distribution Histogram:")
+    print("-------------------------------")
+    print(f"Each █ represents approximately {len(distances)/(bins*50):.1f} pairs")
+    print("Same Person: █")
+    print("Different:  ░\n")
+    
+    # Find overall min and max for combined range
+    min_dist = min(same_distances.min(), diff_distances.min())
+    max_dist = max(same_distances.max(), diff_distances.max())
+    bin_width = (max_dist - min_dist) / bins
+    
+    # Print histogram
+    for i in range(bins):
+        bin_start = f"{same_edges[i]:4.2f}"
+        bin_end = f"{same_edges[i+1]:4.2f}"
+        
+        # Create bar components
+        same_bar = "█" * same_scaled[i]
+        diff_bar = "░" * diff_scaled[i]
+        
+        # Print the bars with counts
+        print(f"{bin_start}-{bin_end}: {same_bar}{diff_bar} | Same: {same_hist[i]:4d} Diff: {diff_hist[i]:4d}")
+    
+    print("\nDetailed Statistics:")
+    print("-------------------")
+    print("Same Person Pairs:")
+    print(f"  Count: {len(same_distances)}")
+    print(f"  Mean ± Std: {np.mean(same_distances):.4f} ± {np.std(same_distances):.4f}")
+    print(f"  Range: [{np.min(same_distances):.4f}, {np.max(same_distances):.4f}]")
+    print(f"  Quartiles: [{np.percentile(same_distances, 25):.4f}, "
+          f"{np.median(same_distances):.4f}, "
+          f"{np.percentile(same_distances, 75):.4f}]")
+    
+    print("\nDifferent Person Pairs:")
+    print(f"  Count: {len(diff_distances)}")
+    print(f"  Mean ± Std: {np.mean(diff_distances):.4f} ± {np.std(diff_distances):.4f}")
+    print(f"  Range: [{np.min(diff_distances):.4f}, {np.max(diff_distances):.4f}]")
+    print(f"  Quartiles: [{np.percentile(diff_distances, 25):.4f}, "
+          f"{np.median(diff_distances):.4f}, "
+          f"{np.percentile(diff_distances, 75):.4f}]")
+    
+    # Calculate metrics
     report = classification_report(test_labels, predictions, output_dict=True)
     
-    # Print statistics
-    print("\nModel Statistics:")
-    print(f"Average distance for same person pairs (Class 1): {distances[test_labels == 1].mean():.4f}")
-    print(f"Average distance for different person pairs (Class 0): {distances[test_labels == 0].mean():.4f}")
-    print(f"\nClassification Report:\n")
+    print("\nMetrics at threshold {:.4f}:".format(threshold))
+    print("---------------------------")
     for label, metrics in report.items():
         if label in ['0', '1']:
-            print(f"Class {label}:")
+            class_name = 'Different' if label == '0' else 'Same'
+            print(f"\nClass {label} ({class_name} Person):")
             print(f"  Precision: {metrics['precision']:.4f}")
             print(f"  Recall: {metrics['recall']:.4f}")
             print(f"  F1-score: {metrics['f1-score']:.4f}")
-            print(f"  Accuracy: {metrics['accuracy']:.4f}") # may not work. we will see.
     
-    return distances, predictions, report
+    # Analysis of threshold
+    suggested_threshold = (np.percentile(same_distances, 95) + 
+                         np.percentile(diff_distances, 5)) / 2
+    print(f"\nThreshold Analysis:")
+    print(f"Current threshold: {threshold:.4f}")
+    print(f"Suggested threshold: {suggested_threshold:.4f}")
+    
+    # Calculate percentile-based statistics for overlap analysis
+    same_95 = np.percentile(same_distances, 95)
+    diff_05 = np.percentile(diff_distances, 5)
+    overlap = max(0, same_95 - diff_05)
+    
+    print("\nOverlap Analysis:")
+    print(f"95th percentile of same-person distances: {same_95:.4f}")
+    print(f"5th percentile of different-person distances: {diff_05:.4f}")
+    print(f"Overlap region: {overlap:.4f}")
+    
+    return {
+        'distances': distances,
+        'predictions': predictions,
+        'confusion_matrix': cm,
+        'report': report,
+        'same_distances': same_distances,
+        'diff_distances': diff_distances,
+        'suggested_threshold': suggested_threshold
+    }
 
 def find_optimal_threshold(distances, test_labels):
     """
@@ -430,8 +491,8 @@ if __name__ == "__main__":
     
     # Analyze model predictions
     distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels)
-    distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels) # change this for the training set stff
-    distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels) # change this as well.
+    # distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels) # change this for the training set stff
+    # distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels) # change this as well.
     
     # Find optimal threshold
     optimal_threshold = find_optimal_threshold(distances, test_labels)
