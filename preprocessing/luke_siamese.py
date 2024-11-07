@@ -2,6 +2,9 @@
 # will try implementing it off of some different source code
 # also will code parts of it from scratch
 
+# dataset info: 112 people, 4 images per person
+# (Could get more images, removed sunglasses)
+
 # docker run --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=67108864 -it -v $(pwd):/my-repo --rm nvcr.io/nvidia/tensorflow:23.10-tf2-py3
 # cd /my-repo/preprocessing
 # pip install tensorflow==2.17.1
@@ -18,7 +21,7 @@ from tensorflow.keras.optimizers import Adam
 from sklearn.model_selection import train_test_split
 import cv2
 from collections import defaultdict
-from sklearn.metrics import confusion_matrix, classification_report
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, roc_curve, auc
 
 
 image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path if using different folder
@@ -126,6 +129,8 @@ def create_base_network():
     # Add custom layers for facial verification
     x = base_model.output
 
+    # may need to add the extra layers back or something... 
+
     # Single larger dense block (could remove this as well and only have one dense block)
     x = Dense(512)(x) # 512 neurons
     x = tf.keras.layers.BatchNormalization()(x) # normalizes activations of neurons
@@ -149,7 +154,7 @@ def euclidean_distance(vectors):
 
 # need a custom contrastive loss function, as old TF contrastive_loss builtin function was discontinued and doesn't
 # work on the version of TF that we are using.
-def contrastive_loss(margin=1.0): # Could change the val in the future, was 2.0 before
+def contrastive_loss(margin=0.5): # Can play around with this and change it
     """Contrastive loss function with margin"""
     def loss(y_true, y_pred):
         # y_true is the 0 or 1 whether they are identical
@@ -219,7 +224,9 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
     test_pairs, test_labels = create_pairs(test_paths, test_identities, positive_pairs_per_person)
     
     model = create_siamese_network()
-    
+
+    # Could find out somehow to tweak the accuracy... Pretty sure it falls under here...
+    # In your model compilation:
     model.compile(
         loss=contrastive_loss(margin=1.0),
         optimizer=Adam(learning_rate=learning_rate), # will likely still have to use learning rate decay, not built in...
@@ -237,10 +244,6 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
     train_pairs_1 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 1]])
     test_pairs_0 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 0]])
     test_pairs_1 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 1]])
-
-    # callbacks = [
-    #     tf.keras.callbacks.TensorBoard(log_dir='./logs', histogram_freq=1),
-    # ]
     
     history = model.fit( # look into model.fit, model.compile, and model.predict
         [train_pairs_0, train_pairs_1],
@@ -248,258 +251,282 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
         validation_data=([test_pairs_0, test_pairs_1], test_labels),
         batch_size=batch_size,
         epochs=epochs
-        # callbacks=callbacks
     )
     
-    return model, history
+    return model, history, test_idx
 
-# # Main execution
-# if __name__ == "__main__":
-#     # Load data from CSV
-#     image_paths, identities = read_csv_data(csv_path)
-    
-#     # Train the model
-#     model, history = train_model(image_paths, identities, positive_pairs_per_person=2) # selects two positive pairs per person, can change later
-    
-#     # Save the model
-#     # model.save('siamese_face_verification.h5')
-
-# def analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels, threshold=1.0):
-#     """
-#     Analyze model predictions and create visualizations to understand model behavior
-#     """
-#     # Get model predictions (distances)
-#     distances = model.predict([test_pairs_0, test_pairs_1])
-    
-#     # Convert distances to binary predictions using threshold
-#     predictions = (distances < threshold).astype(int)
-    
-#     # Calculate confusion matrix
-#     cm = confusion_matrix(test_labels, predictions) # not sure how this is used
-    
-#     # Create detailed classification report
-#     report = classification_report(test_labels, predictions, output_dict=True)
-    
-#     # Print statistics
-#     print("\nModel Statistics:")
-#     print(f"Average distance for same person pairs (Class 1): {distances[test_labels == 1].mean():.4f}")
-#     print(f"Average distance for different person pairs (Class 0): {distances[test_labels == 0].mean():.4f}")
-#     print(f"\nClassification Report:\n")
-#     for label, metrics in report.items():
-#         if label in ['0', '1']:
-#             print(f"Class {label}:")
-#             print(f"  Precision: {metrics['precision']:.4f}")
-#             print(f"  Recall: {metrics['recall']:.4f}")
-#             print(f"  F1-score: {metrics['f1-score']:.4f}")
-#             # print(f"  Accuracy: {metrics['accuracy']:.4f}") # may not work. we will see.
-    
-#     return distances, predictions, report
-
-def analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels, threshold=0.30, bins=20):
+# calculates optimal threshold to maximize accuracy
+def find_optimal_threshold(model, image_paths, identities, positive_pairs_per_person=1, num_thresholds=100):
     """
-    Analyze model predictions with text-based visualizations
-    """
-    # Get model predictions
-    distances = model.predict([test_pairs_0, test_pairs_1])
-    predictions = (distances < threshold).astype(int)
+    Find the optimal threshold value that maximizes classification accuracy.
     
-    # Calculate confusion matrix
-    cm = confusion_matrix(test_labels, predictions)
-    
-    print("\nConfusion Matrix:")
-    print("-----------------")
-    print(f"                 Predicted")
-    print(f"                 Different  Same")
-    print(f"Actual Different    {cm[0,0]:<8d} {cm[0,1]:<8d}")
-    print(f"      Same         {cm[1,0]:<8d} {cm[1,1]:<8d}")
-    
-    # Separate distances by class
-    same_distances = distances[test_labels == 1].flatten()
-    diff_distances = distances[test_labels == 0].flatten()
-    
-    # Create histogram data
-    def create_ascii_histogram(data, bins=20, width=50):
-        """Create ASCII histogram data"""
-        hist, bin_edges = np.histogram(data, bins=bins)
-        max_count = max(hist)
+    Args:
+        model: Trained Siamese network
+        image_paths: List of image paths
+        identities: List of corresponding identities
+        positive_pairs_per_person: Number of positive pairs per person for evaluation
+        num_thresholds: Number of threshold values to test
         
-        # Scale to desired width
-        scaled_hist = ((hist * width) / max_count).astype(int)
-        
-        return hist, scaled_hist, bin_edges
-    
-    # Generate histogram data
-    same_hist, same_scaled, same_edges = create_ascii_histogram(same_distances, bins)
-    diff_hist, diff_scaled, diff_edges = create_ascii_histogram(diff_distances, bins)
-    
-    print("\nDistance Distribution Histogram:")
-    print("-------------------------------")
-    print(f"Each █ represents approximately {len(distances)/(bins*50):.1f} pairs")
-    print("Same Person: █")
-    print("Different:  ░\n")
-    
-    # Find overall min and max for combined range
-    min_dist = min(same_distances.min(), diff_distances.min())
-    max_dist = max(same_distances.max(), diff_distances.max())
-    bin_width = (max_dist - min_dist) / bins
-    
-    # Print histogram
-    for i in range(bins):
-        bin_start = f"{same_edges[i]:4.2f}"
-        bin_end = f"{same_edges[i+1]:4.2f}"
-        
-        # Create bar components
-        same_bar = "█" * same_scaled[i]
-        diff_bar = "░" * diff_scaled[i]
-        
-        # Print the bars with counts
-        print(f"{bin_start}-{bin_end}: {same_bar}{diff_bar} | Same: {same_hist[i]:4d} Diff: {diff_hist[i]:4d}")
-    
-    print("\nDetailed Statistics:")
-    print("-------------------")
-    print("Same Person Pairs:")
-    print(f"  Count: {len(same_distances)}")
-    print(f"  Mean ± Std: {np.mean(same_distances):.4f} ± {np.std(same_distances):.4f}")
-    print(f"  Range: [{np.min(same_distances):.4f}, {np.max(same_distances):.4f}]")
-    print(f"  Quartiles: [{np.percentile(same_distances, 25):.4f}, "
-          f"{np.median(same_distances):.4f}, "
-          f"{np.percentile(same_distances, 75):.4f}]")
-    
-    print("\nDifferent Person Pairs:")
-    print(f"  Count: {len(diff_distances)}")
-    print(f"  Mean ± Std: {np.mean(diff_distances):.4f} ± {np.std(diff_distances):.4f}")
-    print(f"  Range: [{np.min(diff_distances):.4f}, {np.max(diff_distances):.4f}]")
-    print(f"  Quartiles: [{np.percentile(diff_distances, 25):.4f}, "
-          f"{np.median(diff_distances):.4f}, "
-          f"{np.percentile(diff_distances, 75):.4f}]")
-    
-    # Calculate metrics
-    report = classification_report(test_labels, predictions, output_dict=True)
-    
-    print("\nMetrics at threshold {:.4f}:".format(threshold))
-    print("---------------------------")
-    for label, metrics in report.items():
-        if label in ['0', '1']:
-            class_name = 'Different' if label == '0' else 'Same'
-            print(f"\nClass {label} ({class_name} Person):")
-            print(f"  Precision: {metrics['precision']:.4f}")
-            print(f"  Recall: {metrics['recall']:.4f}")
-            print(f"  F1-score: {metrics['f1-score']:.4f}")
-    
-    # Analysis of threshold
-    suggested_threshold = (np.percentile(same_distances, 95) + 
-                         np.percentile(diff_distances, 5)) / 2
-    print(f"\nThreshold Analysis:")
-    print(f"Current threshold: {threshold:.4f}")
-    print(f"Suggested threshold: {suggested_threshold:.4f}")
-    
-    # Calculate percentile-based statistics for overlap analysis
-    same_95 = np.percentile(same_distances, 95)
-    diff_05 = np.percentile(diff_distances, 5)
-    overlap = max(0, same_95 - diff_05)
-    
-    print("\nOverlap Analysis:")
-    print(f"95th percentile of same-person distances: {same_95:.4f}")
-    print(f"5th percentile of different-person distances: {diff_05:.4f}")
-    print(f"Overlap region: {overlap:.4f}")
-    
-    return {
-        'distances': distances,
-        'predictions': predictions,
-        'confusion_matrix': cm,
-        'report': report,
-        'same_distances': same_distances,
-        'diff_distances': diff_distances,
-        'suggested_threshold': suggested_threshold
-    }
-
-def find_optimal_threshold(distances, test_labels):
+    Returns:
+        optimal_threshold: The threshold that maximizes accuracy
+        best_accuracy: The accuracy achieved at the optimal threshold
+        threshold_metrics: Dictionary containing detailed metrics at the optimal threshold
     """
-    Find the optimal threshold that maximizes accuracy
-    """
-    thresholds = np.linspace(0, 2, 200)
-    accuracies = []
-    
-    for threshold in thresholds:
-        predictions = (distances < threshold).astype(int)
-        accuracy = (predictions == test_labels).mean()
-        accuracies.append(accuracy)
-    
-    optimal_threshold = thresholds[np.argmax(accuracies)]
-    
-    
-    return optimal_threshold
-
-def test_specific_pairs(model, image_paths, identities, num_pairs=5):
-    """
-    Test model on specific pairs to visualize its behavior
-    """
-    # Create some same-person pairs
-    same_pairs = []
-    diff_pairs = []
-    
-    # Group images by identity
-    id_to_imgs = defaultdict(list)
-    for path, id_ in zip(image_paths, identities):
-        id_to_imgs[id_].append(path)
-    
-    # Get same-person pairs
-    for id_, paths in id_to_imgs.items():
-        if len(paths) >= 2:
-            same_pairs.append((paths[0], paths[1], 1))
-            if len(same_pairs) >= num_pairs:
-                break
-    
-    # Get different-person pairs
-    ids = list(id_to_imgs.keys())
-    for i in range(num_pairs):
-        id1, id2 = np.random.choice(ids, 2, replace=False)
-        diff_pairs.append((id_to_imgs[id1][0], id_to_imgs[id2][0], 0))
-    
-    # Combine and process pairs
-    test_pairs = same_pairs + diff_pairs
-    paths_1 = [p[0] for p in test_pairs]
-    paths_2 = [p[1] for p in test_pairs]
-    labels = [p[2] for p in test_pairs]
+    # Create evaluation pairs
+    pairs, true_labels = create_pairs(image_paths, identities, positive_pairs_per_person)
     
     # Load and preprocess images
-    imgs_1 = np.array([load_and_preprocess_image(p) for p in paths_1])
-    imgs_2 = np.array([load_and_preprocess_image(p) for p in paths_2])
+    pairs_0 = np.array([load_and_preprocess_image(img) for img in pairs[:, 0]])
+    pairs_1 = np.array([load_and_preprocess_image(img) for img in pairs[:, 1]])
     
-    # Get predictions
-    distances = model.predict([imgs_1, imgs_2])
+    # Get model predictions (distances)
+    distances = model.predict([pairs_0, pairs_1])
     
+    # Initialize variables to store best results
+    best_accuracy = 0
+    optimal_threshold = 0
+    best_metrics = None
+    
+    # Calculate min and max distances to set threshold range
+    min_dist = np.min(distances) # get minimum distance between pairs
+    max_dist = np.max(distances) # get maximum distance between pairs
+    thresholds = np.linspace(min_dist, max_dist, num_thresholds) # linearly space 100 vals between min and max
+    
+    print("\nFinding optimal threshold...")
+    print("-" * 50)
+    
+    # Test each threshold
+    for threshold in thresholds:
+        pred_labels = (distances <= threshold).astype(int)
+        accuracy = np.mean(pred_labels.flatten() == true_labels)
+        
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            optimal_threshold = threshold
+            
+            # Calculate additional metrics at this threshold
+            precision, recall, f1, _ = precision_recall_fscore_support(true_labels, pred_labels.flatten())
+            conf_matrix = confusion_matrix(true_labels, pred_labels.flatten())
+            
+            best_metrics = {
+                'accuracy': best_accuracy,
+                'threshold': optimal_threshold,
+                'precision': precision,
+                'recall': recall,
+                'f1': f1,
+                'confusion_matrix': conf_matrix
+            }
+    
+    print(f"\nOptimal threshold found: {optimal_threshold:.4f}")
+    print(f"Best accuracy achieved: {best_accuracy:.4f}")
+    print("\nMetrics at optimal threshold:")
+    print("Same Person (Class 1):")
+    print(f"Precision: {best_metrics['precision'][1]:.4f}")
+    print(f"Recall: {best_metrics['recall'][1]:.4f}")
+    print(f"F1-Score: {best_metrics['f1'][1]:.4f}")
+    print("\nDifferent Person (Class 0):")
+    print(f"Precision: {best_metrics['precision'][0]:.4f}")
+    print(f"Recall: {best_metrics['recall'][0]:.4f}")
+    print(f"F1-Score: {best_metrics['f1'][0]:.4f}")
+    
+    # Print confusion matrix
+    print("\nConfusion Matrix at optimal threshold:")
+    print("True\Pred  Different  Same")
+    print(f"Different  {best_metrics['confusion_matrix'][0][0]:9d} {best_metrics['confusion_matrix'][0][1]:6d}")
+    print(f"Same       {best_metrics['confusion_matrix'][1][0]:9d} {best_metrics['confusion_matrix'][1][1]:6d}")
+    
+    return optimal_threshold, best_accuracy, best_metrics
 
-if __name__ == "__main__":
-    # Load data from CSV
-    image_paths, identities = read_csv_data(csv_path)
+# new method, evaluates the entire thing with all of the images
+def evaluate_siamese_network(model, image_paths, identities, threshold=0.5, positive_pairs_per_person=1):
+    """
+    Comprehensive evaluation of Siamese network performance.
+    
+    Args:
+        model: Trained Siamese network
+        image_paths: List of image paths
+        identities: List of corresponding identities
+        threshold: Distance threshold for classification (default 0.5, but will have optimal_threshold inserted)
+        positive_pairs_per_person: Number of positive pairs per person for evaluation
+    """
+    
+    # Create evaluation pairs
+    pairs, true_labels = create_pairs(image_paths, identities, positive_pairs_per_person)
+    
+    # Load and preprocess images
+    pairs_0 = np.array([load_and_preprocess_image(img) for img in pairs[:, 0]])
+    pairs_1 = np.array([load_and_preprocess_image(img) for img in pairs[:, 1]])
+    
+    # Get model predictions (distances)
+    distances = model.predict([pairs_0, pairs_1])
+    
+    # Convert distances to binary predictions using threshold
+    pred_labels = (distances <= threshold).astype(int)
+    
+    # Calculate metrics
+    precision, recall, f1, _ = precision_recall_fscore_support(true_labels, pred_labels.flatten())
+    conf_matrix = confusion_matrix(true_labels, pred_labels.flatten())
+    
+    # Separate distances for same and different pairs
+    same_person_distances = distances[true_labels == 1].flatten()
+    diff_person_distances = distances[true_labels == 0].flatten()
+    
+    # Calculate ROC AUC
+    fpr, tpr, _ = roc_curve(true_labels, -distances.flatten())  # Negative distances because smaller distance = more similar
+    roc_auc = auc(fpr, tpr)
+    
+    # Print detailed metrics
+    print("\nDetailed Evaluation Metrics: (Trained on most of these)")
+    print("-" * 50)
+    print(f"Number of pairs evaluated: {len(true_labels)}")
+    print(f"Number of same-person pairs: {len(same_person_distances)}")
+    print(f"Number of different-person pairs: {len(diff_person_distances)}")
+    print("\nDistance Statistics:")
+    print(f"Same Person - Mean Distance: {np.mean(same_person_distances):.4f} ± {np.std(same_person_distances):.4f}")
+    print(f"Different Person - Mean Distance: {np.mean(diff_person_distances):.4f} ± {np.std(diff_person_distances):.4f}")
+    print(f"Same Person - Min Distance: {np.min(same_person_distances):.4f}")
+    print(f"Same Person - Max Distance: {np.max(same_person_distances):.4f}")
+    print(f"Different Person - Min Distance: {np.min(diff_person_distances):.4f}")
+    print(f"Different Person - Max Distance: {np.max(diff_person_distances):.4f}")
+    print("\nClassification Metrics (threshold = {:.2f}):".format(threshold))
+    print("Same Person (Class 1):")
+    print(f"Precision: {precision[1]:.4f}")
+    print(f"Recall: {recall[1]:.4f}")
+    print(f"F1-Score: {f1[1]:.4f}")
+    print("\nDifferent Person (Class 0):")
+    print(f"Precision: {precision[0]:.4f}")
+    print(f"Recall: {recall[0]:.4f}")
+    print(f"F1-Score: {f1[0]:.4f}")
+    print(f"\nROC AUC Score: {roc_auc:.4f}")
+    
+    # Print confusion matrix
+    print("\nConfusion Matrix:")
+    print("True\Pred  Different  Same")
+    print(f"Different  {conf_matrix[0][0]:9d} {conf_matrix[0][1]:6d}")
+    print(f"Same       {conf_matrix[1][0]:9d} {conf_matrix[1][1]:6d}")
+    
+    return {
+        'same_person_distances': same_person_distances,
+        'diff_person_distances': diff_person_distances,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'confusion_matrix': conf_matrix,
+        'auc': roc_auc
+    }
 
-    # Maybe put the assortment part in the main function...
+# evaluates just the test set to see how it performs
+def evaluate_test_set(model, test_paths, test_identities, threshold=0.5, positive_pairs_per_person=1):
+    """
+    Evaluate model performance specifically on the test set.
     
-    # Train the model
-    model, history = train_model(image_paths, identities, positive_pairs_per_person=2)
+    Args:
+        model: Trained Siamese network
+        test_paths: List of image paths in the test set
+        test_identities: List of corresponding identities in the test set
+        threshold: Distance threshold for classification
+        positive_pairs_per_person: Number of positive pairs per person for evaluation
+    """
     
-    # Get test data
-    _, test_idx = train_test_split(np.arange(len(image_paths)), test_size=0.2, random_state=5)
-    test_paths = [image_paths[i] for i in test_idx]
-    test_identities = [identities[i] for i in test_idx]
-    test_pairs, test_labels = create_pairs(test_paths, test_identities, positive_pairs_per_person=2)
+    print("\nTest Set Evaluation: (Not trained on these, but used in validation)")
+    print("-" * 50)
+    print(f"Number of test images: {len(test_paths)}")
+    print(f"Number of unique identities in test set: {len(set(test_identities))}")
     
-    # Prepare test data
+    # Create pairs only from test set
+    test_pairs, test_labels = create_pairs(test_paths, test_identities, positive_pairs_per_person)
+    
+    # Load and preprocess test images
     test_pairs_0 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 0]])
     test_pairs_1 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 1]])
     
-    # Analyze model predictions
-    distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels)
-    # distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels) # change this for the training set stff
-    # distances, predictions, report = analyze_model_predictions(model, test_pairs_0, test_pairs_1, test_labels) # change this as well.
+    # Get model predictions
+    distances = model.predict([test_pairs_0, test_pairs_1])
     
-    # Find optimal threshold
-    optimal_threshold = find_optimal_threshold(distances, test_labels)
+    # Convert distances to binary predictions using threshold
+    pred_labels = (distances <= threshold).astype(int)
     
-    # Test on specific pairs
-    # test_specific_pairs(model, image_paths, identities)
+    # Calculate metrics
+    precision, recall, f1, _ = precision_recall_fscore_support(test_labels, pred_labels.flatten())
+    conf_matrix = confusion_matrix(test_labels, pred_labels.flatten())
+    
+    # Separate distances for same and different pairs
+    same_person_distances = distances[test_labels == 1].flatten()
+    diff_person_distances = distances[test_labels == 0].flatten()
+    
+    # Calculate ROC AUC
+    fpr, tpr, _ = roc_curve(test_labels, -distances.flatten())
+    roc_auc = auc(fpr, tpr)
+    
+    # Print detailed metrics
+    print(f"\nNumber of test pairs evaluated: {len(test_labels)}")
+    print(f"Number of same-person pairs: {len(same_person_distances)}")
+    print(f"Number of different-person pairs: {len(diff_person_distances)}")
+    
+    print("\nDistance Statistics (Test Set):")
+    print(f"Same Person - Mean Distance: {np.mean(same_person_distances):.4f} ± {np.std(same_person_distances):.4f}")
+    print(f"Different Person - Mean Distance: {np.mean(diff_person_distances):.4f} ± {np.std(diff_person_distances):.4f}")
+    print(f"Same Person - Min Distance: {np.min(same_person_distances):.4f}")
+    print(f"Same Person - Max Distance: {np.max(same_person_distances):.4f}")
+    print(f"Different Person - Min Distance: {np.min(diff_person_distances):.4f}")
+    print(f"Different Person - Max Distance: {np.max(diff_person_distances):.4f}")
+    
+    print(f"\nClassification Metrics (threshold = {threshold:.2f}):")
+    print("Same Person (Class 1):")
+    print(f"Precision: {precision[1]:.4f}")
+    print(f"Recall: {recall[1]:.4f}")
+    print(f"F1-Score: {f1[1]:.4f}")
+    
+    print("\nDifferent Person (Class 0):")
+    print(f"Precision: {precision[0]:.4f}")
+    print(f"Recall: {recall[0]:.4f}")
+    print(f"F1-Score: {f1[0]:.4f}")
+    
+    print(f"\nROC AUC Score: {roc_auc:.4f}")
+    
+    print("\nConfusion Matrix:")
+    print("True\Pred  Different  Same")
+    print(f"Different  {conf_matrix[0][0]:9d} {conf_matrix[0][1]:6d}")
+    print(f"Same       {conf_matrix[1][0]:9d} {conf_matrix[1][1]:6d}")
+    
+    accuracy = (conf_matrix[0][0] + conf_matrix[1][1]) / (conf_matrix[0][0] + conf_matrix[0][1] + conf_matrix[1][0] + conf_matrix[1][1])
+    print(f"\nAccuracy: {accuracy:.4f}")
 
-    # get function to return training and validation pairs
-    # insert optimal threshold into the training function
-    # figure out what the model even returns for the training, as it seems that the threshold may just be at 1.
+
+    return {
+        'same_person_distances': same_person_distances,
+        'diff_person_distances': diff_person_distances,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'confusion_matrix': conf_matrix,
+        'auc': roc_auc,
+        'accuracy': accuracy
+    }
+
+# Main execution
+if __name__ == "__main__":
+    # Load data from CSV
+    image_paths, identities = read_csv_data(csv_path)
+    
+    # Train the model
+    desired_positive_pairs = 3 # selects three positive (and consequentially three negative) pairs per person, can change later
+    # model, history = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs) 
+    model, history, test_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs)
+
+    # After training
+    optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, image_paths, identities, positive_pairs_per_person=desired_positive_pairs) 
+
+    # Then use this threshold in your evaluation function
+    evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+
+    # Evaluate metrics on a test set
+    test_paths = [image_paths[i] for i in test_idx]
+    test_identities = [identities[i] for i in test_idx]
+    test_metrics = evaluate_test_set(model, test_paths, test_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+
+    # Save the model
+    # model.save('siamese_face_verification.h5')
+
+    # could look more into stuff like further optimal thresholds
+    # could also do other stuff... not sure
