@@ -528,5 +528,13 @@ if __name__ == "__main__":
     # Save the model
     # model.save('siamese_face_verification.h5')
 
-    # could look more into stuff like further optimal thresholds
-    # could also do other stuff... not sure
+# Things to do for the future...
+
+# try to save model, so evaluataion can save time. will also need this later.
+# create separate validation from test set. Should all be unique. 70/15/15
+# in test, look at what it is getting right, and what it is getting wrong (specific individuals)
+# could create histogram images
+# look at the before training and after training statistics (get values before and after)
+# make sure that training is acutally doing something!!!
+# do not display GUI, save as png/jpg in separate folder. Start saving model as well.
+# should set the optimal threshold just on the validation set (?) probably and havet o change as well.
