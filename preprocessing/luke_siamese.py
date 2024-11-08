@@ -135,7 +135,7 @@ def create_base_network():
     x = Dense(512)(x) # 512 neurons
     x = tf.keras.layers.BatchNormalization()(x) # normalizes activations of neurons
     x = tf.keras.layers.ReLU()(x) # activation function
-    x = tf.keras.layers.Dropout(0.2)(x) # randomly drops 20% of connections to prevent overfitting, helps generalization
+    # x = tf.keras.layers.Dropout(0.2)(x) # randomly drops 20% of connections to prevent overfitting, helps generalization
     
     # Final embedding
     x = Dense(512)(x)
@@ -154,7 +154,7 @@ def euclidean_distance(vectors):
 
 # need a custom contrastive loss function, as old TF contrastive_loss builtin function was discontinued and doesn't
 # work on the version of TF that we are using.
-def contrastive_loss(margin=0.5): # Can play around with this and change it
+def contrastive_loss(margin=1.0): # Can play around with this and change it, could go smaller potentially, MODIFY THIS VAL IN TRAIN_MODEL
     """Contrastive loss function with margin"""
     def loss(y_true, y_pred):
         # y_true is the 0 or 1 whether they are identical
@@ -228,7 +228,7 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
     # Could find out somehow to tweak the accuracy... Pretty sure it falls under here...
     # In your model compilation:
     model.compile(
-        loss=contrastive_loss(margin=1.0),
+        loss=contrastive_loss(margin=0.5), # NEED TO CHANGE THIS VALUE WITH THE LOSS, NOT OTHER
         optimizer=Adam(learning_rate=learning_rate), # will likely still have to use learning rate decay, not built in...
         metrics=["accuracy", "precision", "recall"]
     )
@@ -534,7 +534,7 @@ if __name__ == "__main__":
 
 # create separate validation from test set. Should all be unique. 70/15/15 training/validation/testing split.
 
-# create seed function for the create_pairs method, so we are able to 
+# create seed function for the create_pairs method, so we are able to replicate the same sets on different models
 
 # in test, look at what it is getting right, and what it is getting wrong (specific individuals)
 # could create histogram images

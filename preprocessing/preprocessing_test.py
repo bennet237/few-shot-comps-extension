@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
 
-    image_path = '/Users/luke/Downloads/TD_RGB_E_Set1/23/TD_RGB_E_5.jpg' # change path to access images from other places
+    image_path = '/home/drakel2/Desktop/TuftsFaces/Set1/10//TD_RGB_E_4.jpg' # change path to access images from other places
 
     image = cv2.imread(image_path)
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -39,6 +39,8 @@ if __name__ == "__main__":
 
     # Gets facial landmarks (eyes, nose, mouth, etc.)
     landmarks = predictor(gray, face)
+
+    # INCLUDE DRAWING A BOX AROUND THE FACE HERE, AND NOT DOING THE REST OF THE CODE...
 
     # Get coordinates of the eyes (landmarks: 36 for left eye, 45 for right eye)
     left_eye = np.array([landmarks.part(36).x, landmarks.part(36).y])
