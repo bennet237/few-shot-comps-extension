@@ -531,10 +531,19 @@ if __name__ == "__main__":
 # Things to do for the future...
 
 # try to save model, so evaluataion can save time. will also need this later.
-# create separate validation from test set. Should all be unique. 70/15/15
+
+# create separate validation from test set. Should all be unique. 70/15/15 training/validation/testing split.
+
+# create seed function for the create_pairs method, so we are able to 
+
 # in test, look at what it is getting right, and what it is getting wrong (specific individuals)
 # could create histogram images
 # look at the before training and after training statistics (get values before and after)
 # make sure that training is acutally doing something!!!
+
 # do not display GUI, save as png/jpg in separate folder. Start saving model as well.
-# should set the optimal threshold just on the validation set (?) probably and havet o change as well.
+
+# should set the optimal threshold just on the validation set probably and have it change as well.
+
+# could modify the dropout and remove this; this prevents overfitting, but if our model isn't learning anything
+# in the first place then this is obsolete.
