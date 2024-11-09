@@ -260,7 +260,6 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
     model = create_siamese_network()
 
     # Could find out somehow to tweak the accuracy... Pretty sure it falls under here...
-    # In your model compilation:
     model.compile(
         loss=contrastive_loss(margin=0.5), # NEED TO CHANGE THIS VALUE WITH THE LOSS, NOT OTHER
         optimizer=Adam(learning_rate=learning_rate), # will likely still have to use learning rate decay, not built in...
@@ -269,10 +268,6 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
 
     # contrastive loss seems to be better than binary-cross entropy for this task of computing image distance
     # model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy", "precision", "recall"])
-    
-    # convert labels to float32 to make sure tensors work (may be able to exclude, test)
-    # train_labels = np.array(train_labels, dtype=np.float32)
-    # val_labels = np.array(val_labels, dtype=np.float32)
     
     # separates first and second images from each pair, then loads in preprocessed images
     train_pairs_0 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 0]])
@@ -549,7 +544,6 @@ if __name__ == "__main__":
     random_seed = 42 # randomness seed to use. This selects the pairing of images used in the training and test sets
 
     # Train the model
-    # model, history = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs) 
     model, history, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
 
     # Get validation paths and identities
