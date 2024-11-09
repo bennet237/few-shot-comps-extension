@@ -50,7 +50,7 @@ def read_csv_data(csv_path):
     
     return image_paths, identities
 
-def create_pairs(image_paths, identities, positive_pairs_per_person=1):
+def create_pairs(image_paths, identities, positive_pairs_per_person=1, seed=None):
     """Create positive and negative pairs for training
     
     Args:
@@ -58,7 +58,13 @@ def create_pairs(image_paths, identities, positive_pairs_per_person=1):
         identities: List of corresponding identity numbers
         positive_pairs_per_person: Number of positive pairs to create per person
                                 if no positive pairs variable given, sets it to one
+        seed: Random seed for reproducibility (default: None)
     """
+
+    # Set the random seed if provided
+    if seed is not None:
+        np.random.seed(seed)
+
     pairs = [] # positive and negative image pair file paths
     labels = [] # 0 or 1, depending on whether it is a positive (1) or negative (0) pair
     
@@ -135,6 +141,7 @@ def create_base_network():
     x = Dense(512)(x) # 512 neurons
     x = tf.keras.layers.BatchNormalization()(x) # normalizes activations of neurons
     x = tf.keras.layers.ReLU()(x) # activation function
+    # removed dropout for now, could add back later in the future
     # x = tf.keras.layers.Dropout(0.2)(x) # randomly drops 20% of connections to prevent overfitting, helps generalization
     
     # Final embedding
@@ -191,7 +198,7 @@ def create_siamese_network():
     processed_b = base_network(input_b)
     
     # L2 normalize the embeddings
-    # Not sure what this means, but models I've looked at include this
+    # Not sure what this means, but models I've looked at include this (could remove in future?)
     processed_a = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_a)
     processed_b = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_b)
     
@@ -204,24 +211,51 @@ def create_siamese_network():
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
 
-def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1):
-    """Train the siamese network"""
-    indices = np.arange(len(image_paths))
-    train_idx, test_idx = train_test_split(
-        indices, 
-        test_size=0.2,
-        shuffle=True,
-        random_state=42 # change this val for seeds
-    )   # even though a random seed is here, generate pairs still operates randomly
-        # may consider in the future implementing a seed into that function if necessary... (probably have to for comparative accuracy)
+def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
+    """Train the siamese network with separate training, validation, and test sets
     
+    Args:
+        image_paths: List of image paths
+        identities: List of corresponding identities
+        epochs: Number of training epochs
+        batch_size: Batch size for training
+        learning_rate: Learning rate for optimizer
+        positive_pairs_per_person: Number of positive pairs per person
+                                if no positive pairs variable given, sets it to one
+        seed: Random seed for reproducibility
+    """
+
+    # First split: 70% train, 30% remaining
+    train_idx, remaining_idx = train_test_split(
+        np.arange(len(image_paths)),
+        test_size=0.3,
+        shuffle=True,
+        random_state=seed
+    )
+
+    # Second split: Split remaining 30% into validation (15%) and test (15%)
+    # Since we want equal sizes, use test_size=0.5 to split the remaining data
+    val_idx, test_idx = train_test_split(
+        remaining_idx,
+        test_size=0.5,
+        shuffle=True,
+        random_state=seed
+    )
+
+    # Create the three datasets
     train_paths = [image_paths[i] for i in train_idx]
     train_identities = [identities[i] for i in train_idx]
-    test_paths = [image_paths[i] for i in test_idx]
-    test_identities = [identities[i] for i in test_idx]
     
-    train_pairs, train_labels = create_pairs(train_paths, train_identities, positive_pairs_per_person)
-    test_pairs, test_labels = create_pairs(test_paths, test_identities, positive_pairs_per_person)
+    val_paths = [image_paths[i] for i in val_idx]
+    val_identities = [identities[i] for i in val_idx]
+    
+    # No need to create test_paths and test_identities here since they're not used
+    
+    # Create pairs for each set with the same seed for reproducibility
+    train_pairs, train_labels = create_pairs(train_paths, train_identities, 
+                                           positive_pairs_per_person, seed=seed)
+    val_pairs, val_labels = create_pairs(val_paths, val_identities, 
+                                       positive_pairs_per_person, seed=seed)
     
     model = create_siamese_network()
 
@@ -236,24 +270,25 @@ def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate
     # contrastive loss seems to be better than binary-cross entropy for this task of computing image distance
     # model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy", "precision", "recall"])
     
-    train_labels = np.array(train_labels, dtype=np.float32)
-    test_labels = np.array(test_labels, dtype=np.float32)
+    # convert labels to float32 to make sure tensors work (may be able to exclude, test)
+    # train_labels = np.array(train_labels, dtype=np.float32)
+    # val_labels = np.array(val_labels, dtype=np.float32)
     
-    # separates first and second images from each pair, then loads and preprocesses them
+    # separates first and second images from each pair, then loads in preprocessed images
     train_pairs_0 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 0]])
     train_pairs_1 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 1]])
-    test_pairs_0 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 0]])
-    test_pairs_1 = np.array([load_and_preprocess_image(img) for img in test_pairs[:, 1]])
+    val_pairs_0 = np.array([load_and_preprocess_image(img) for img in val_pairs[:, 0]])
+    val_pairs_1 = np.array([load_and_preprocess_image(img) for img in val_pairs[:, 1]])
     
-    history = model.fit( # look into model.fit, model.compile, and model.predict
-        [train_pairs_0, train_pairs_1],
-        train_labels,
-        validation_data=([test_pairs_0, test_pairs_1], test_labels),
+    # Train the model using validation set instead of test set
+    history = model.fit(
+        [train_pairs_0, train_pairs_1], train_labels,
+        validation_data=([val_pairs_0, val_pairs_1], val_labels),
         batch_size=batch_size,
         epochs=epochs
     )
     
-    return model, history, test_idx
+    return model, history, test_idx, val_idx
 
 # calculates optimal threshold to maximize accuracy
 def find_optimal_threshold(model, image_paths, identities, positive_pairs_per_person=1, num_thresholds=100):
@@ -292,7 +327,7 @@ def find_optimal_threshold(model, image_paths, identities, positive_pairs_per_pe
     max_dist = np.max(distances) # get maximum distance between pairs
     thresholds = np.linspace(min_dist, max_dist, num_thresholds) # linearly space 100 vals between min and max
     
-    print("\nFinding optimal threshold...")
+    print("\nFinding optimal threshold... (Found only from validation set)")
     print("-" * 50)
     
     # Test each threshold
@@ -337,7 +372,7 @@ def find_optimal_threshold(model, image_paths, identities, positive_pairs_per_pe
     
     return optimal_threshold, best_accuracy, best_metrics
 
-# new method, evaluates the entire thing with all of the images
+# new method, evaluates the entire thing with all of the images, largely generated by AI
 def evaluate_siamese_network(model, image_paths, identities, threshold=0.5, positive_pairs_per_person=1):
     """
     Comprehensive evaluation of Siamese network performance.
@@ -376,7 +411,7 @@ def evaluate_siamese_network(model, image_paths, identities, threshold=0.5, posi
     roc_auc = auc(fpr, tpr)
     
     # Print detailed metrics
-    print("\nDetailed Evaluation Metrics: (Trained on most of these)")
+    print("\nDetailed Evaluation Metrics: (All images from training, validation, and test sets combined)")
     print("-" * 50)
     print(f"Number of pairs evaluated: {len(true_labels)}")
     print(f"Number of same-person pairs: {len(same_person_distances)}")
@@ -415,7 +450,7 @@ def evaluate_siamese_network(model, image_paths, identities, threshold=0.5, posi
         'auc': roc_auc
     }
 
-# evaluates just the test set to see how it performs
+# evaluates just the test set to see how it performs, largely generated by AI
 def evaluate_test_set(model, test_paths, test_identities, threshold=0.5, positive_pairs_per_person=1):
     """
     Evaluate model performance specifically on the test set.
@@ -428,10 +463,10 @@ def evaluate_test_set(model, test_paths, test_identities, threshold=0.5, positiv
         positive_pairs_per_person: Number of positive pairs per person for evaluation
     """
     
-    print("\nTest Set Evaluation: (Not trained on these, but used in validation)")
+    print("\nTest Set Evaluation: (Never before seen pairs)")
     print("-" * 50)
     print(f"Number of test images: {len(test_paths)}")
-    print(f"Number of unique identities in test set: {len(set(test_identities))}")
+    print(f"Number of unique identities (different people) in test set: {len(set(test_identities))}")
     
     # Create pairs only from test set
     test_pairs, test_labels = create_pairs(test_paths, test_identities, positive_pairs_per_person)
@@ -509,20 +544,29 @@ if __name__ == "__main__":
     # Load data from CSV
     image_paths, identities = read_csv_data(csv_path)
     
-    # Train the model
+    # Set params for the model
     desired_positive_pairs = 3 # selects three positive (and consequentially three negative) pairs per person, can change later
+    random_seed = 42 # randomness seed to use. This selects the pairing of images used in the training and test sets
+
+    # Train the model
     # model, history = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs) 
-    model, history, test_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs)
+    model, history, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
 
-    # After training
-    optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, image_paths, identities, positive_pairs_per_person=desired_positive_pairs) 
+    # Get validation paths and identities
+    val_paths = [image_paths[i] for i in val_idx]
+    val_identities = [identities[i] for i in val_idx]
 
-    # Then use this threshold in your evaluation function
+    # Get the optimal threshold, which is the highest accuracy based on the validation set
+    optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, val_paths, val_identities, positive_pairs_per_person=desired_positive_pairs)
+
+    # Then use this threshold in your evaluation function (gets overall accuracy of all available data being training, val, and test)
     evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
 
-    # Evaluate metrics on a test set
+    # Get the test paths and identities
     test_paths = [image_paths[i] for i in test_idx]
     test_identities = [identities[i] for i in test_idx]
+
+    # Run model with optimal threshold on the never-before-seen test set
     test_metrics = evaluate_test_set(model, test_paths, test_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
 
     # Save the model
@@ -532,18 +576,9 @@ if __name__ == "__main__":
 
 # try to save model, so evaluataion can save time. will also need this later.
 
-# create separate validation from test set. Should all be unique. 70/15/15 training/validation/testing split.
-
-# create seed function for the create_pairs method, so we are able to replicate the same sets on different models
-
 # in test, look at what it is getting right, and what it is getting wrong (specific individuals)
 # could create histogram images
 # look at the before training and after training statistics (get values before and after)
 # make sure that training is acutally doing something!!!
 
 # do not display GUI, save as png/jpg in separate folder. Start saving model as well.
-
-# should set the optimal threshold just on the validation set probably and have it change as well.
-
-# could modify the dropout and remove this; this prevents overfitting, but if our model isn't learning anything
-# in the first place then this is obsolete.
