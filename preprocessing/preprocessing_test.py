@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 
 if __name__ == "__main__":
 
-    image_path = '/home/drakel2/Desktop/TuftsFaces/Set2/30//TD_RGB_E_4.jpg' # change path to access images from other places
+    image_path = '/home/Downloads/example/bennet_yellow-modified.jpg' # change path to access images from other places
     display_boxed_image = True # if true, displays whole image with face. if false, displays cropped and rotated image.
 
     image = cv2.imread(image_path)

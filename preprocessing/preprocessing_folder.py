@@ -22,7 +22,7 @@ import numpy as np
 #       - Image 3.jpg
 #       - Image 4.jpg
 
-input_folder_path = '/home/drakel2/Desktop/Tufts Faces/Set4' # modify for approriate path name, make sure it doesn't end in a slash.
+input_folder_path = '/home/tefub/Downloads/example' # modify for approriate path name, make sure it doesn't end in a slash.
 
 
 # Function to preprocess an image

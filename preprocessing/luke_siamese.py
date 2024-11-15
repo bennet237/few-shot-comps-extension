@@ -9,12 +9,13 @@
 # cd /my-repo/preprocessing
 # pip install tensorflow==2.17.1
 # pip install opencv-python-headless
+# pip install matplotlib
 # python luke_siamese.py
 
 import tensorflow as tf
 import numpy as np
 import csv
-from tensorflow.keras.applications import ResNet50
+from tensorflow.keras.applications import ResNet50, VGG19
 from tensorflow.keras.layers import Dense, Input, Lambda
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
@@ -22,11 +23,11 @@ from sklearn.model_selection import train_test_split
 import cv2
 from collections import defaultdict
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, roc_curve, auc
-from visualizations import plot_metrics_histogram, plot_model_performance1
+from visualizations import plot_metrics_histogram, plot_model_performance1, plot_metrics_histogram_multiple, print_metrics_table
 
 
 image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path if using different folder
-csv_path = image_directory + "labels_dataset.csv" # change depending on dataset you want to use.
+csv_path = image_directory + "labels_dataset_no_shades.csv" # change depending on dataset you want to use.
 
 # Data preparation
 def load_and_preprocess_image(image_path):
@@ -124,8 +125,8 @@ def create_pairs(image_paths, identities, positive_pairs_per_person=1, seed=None
     return pairs, labels
 
 def create_base_network():
-    """Create the base network using ResNet50"""
-    base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
+    """Create the base network using VGG19"""
+    base_model = VGG19(weights='imagenet', include_top=False, pooling='avg')
     # should be able to use global pooling average, reduces spatial information to a single vector
     # lose some info, but then takes a lot fewer parameters
     
@@ -212,7 +213,7 @@ def create_siamese_network():
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
 
-def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
+def train_model(image_paths, identities, epochs=20, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
     """Train the siamese network with separate training, validation, and test sets
     
     Args:
@@ -541,9 +542,9 @@ if __name__ == "__main__":
     image_paths, identities = read_csv_data(csv_path)
     
     # Set params for the model
-    desired_positive_pairs = 3 # selects three positive (and consequentially three negative) pairs per person, can change later
+    desired_positive_pairs = 5 # selects three positive (and consequentially three negative) pairs per person, can change later
     random_seed = 42 # randomness seed to use. This selects the pairing of images used in the training and test sets
-    architecture = 'ResNet50'
+    architecture = 'VGG19'
 
     # Train the model
     model, history, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
@@ -568,10 +569,15 @@ if __name__ == "__main__":
     # Generates a performance chart only for one model
     # See luke_siamese_model_performance_exp for function that generates performance chart for ResNet50 and VGG19, 
     # There were too many changes to be able to do that so I decided to have a file separate from the main one for now
-    plot_model_performance1(history, architecture, test_metrics['accuracy'], save_folder='experiments')
+    # plot_model_performance1(history, architecture, test_metrics['accuracy'], save_folder='experiments')
 
     # Call the function to plot and save the metrics histogram to the 'experiments' folder
-    plot_metrics_histogram(test_metrics, desired_positive_pairs, save_folder='experiments')
+    # plot_metrics_histogram(test_metrics, desired_positive_pairs, save_folder='experiments')
+
+    # Call the function to plot and save the metrics histogram to the 'experiments' folder
+    # Shows metrics for all 1, 3, and 5 desired_positive_pairs in one plot
+    # plot_metrics_histogram_multiple(metrics_list, desired_positive_pairs, save_folder='experiments')
+    print_metrics_table(test_metrics, desired_positive_pairs, save_folder='experiments')
 
     # Save the model
     # model.save('siamese_face_verification.h5')
