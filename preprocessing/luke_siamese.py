@@ -15,6 +15,7 @@
 import tensorflow as tf
 import numpy as np
 import csv
+from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import ResNet50, VGG19
 from tensorflow.keras.layers import Dense, Input, Lambda
 from tensorflow.keras.models import Model
@@ -27,11 +28,11 @@ from visualizations import plot_metrics_histogram, plot_model_performance1, plot
 
 
 image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path if using different folder
-csv_path = image_directory + "labels_dataset_no_shades.csv" # change depending on dataset you want to use.
+csv_path = image_directory + "labels_dataset_shades.csv" # change depending on dataset you want to use.
 
 # Data preparation
 def load_and_preprocess_image(image_path):
-    """Load and preprocess image for ResNet50"""
+    """Load and preprocess image for VGG19"""
     img = cv2.imread(image_path)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) # OpenCV loads in BGR, so need to convert
     img = img.astype(np.float32) / 255.0 # normalizes image, giving proper values.
@@ -153,6 +154,7 @@ def create_base_network():
     
     return Model(inputs=base_model.input, outputs=x)
 
+@tf.keras.saving.register_keras_serializable()
 def euclidean_distance(vectors):
     """Compute euclidean distance between vectors"""
     # x = first set of embeddings
@@ -205,7 +207,7 @@ def create_siamese_network():
     processed_b = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_b)
     
     # Calculates distance between the embeddings
-    distance = Lambda(euclidean_distance)([processed_a, processed_b])
+    distance = Lambda(euclidean_distance, output_shape=(1,))([processed_a, processed_b])
     
     return Model(inputs=[input_a, input_b], outputs=distance)
 
@@ -213,7 +215,7 @@ def create_siamese_network():
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
 
-def train_model(image_paths, identities, epochs=20, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
+def train_model(image_paths, identities, epochs=5, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
     """Train the siamese network with separate training, validation, and test sets
     
     Args:
@@ -285,7 +287,7 @@ def train_model(image_paths, identities, epochs=20, batch_size=32, learning_rate
         epochs=epochs
     )
     
-    return model, history, test_idx, val_idx
+    return model, history, train_idx, test_idx, val_idx
 
 # calculates optimal threshold to maximize accuracy
 def find_optimal_threshold(model, image_paths, identities, positive_pairs_per_person=1, num_thresholds=100):
@@ -477,6 +479,11 @@ def evaluate_test_set(model, test_paths, test_identities, threshold=0.5, positiv
     
     # Convert distances to binary predictions using threshold
     pred_labels = (distances <= threshold).astype(int)
+    for i in range(len(test_pairs)):
+        print(f"Test pair: \n\n {test_pairs[i][:]}\n")
+        print(f"Test label:  {test_labels[i]}\n")
+        print(f"Distance:  {distances[i]}\n")
+        print(f"Predicted labels: {pred_labels[i]}\n\n")
     
     # Calculate metrics
     precision, recall, f1, _ = precision_recall_fscore_support(test_labels, pred_labels.flatten())
@@ -547,7 +554,14 @@ if __name__ == "__main__":
     architecture = 'VGG19'
 
     # Train the model
-    model, history, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
+    model, history, train_idx, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
+
+    # Load model
+    # model, history, train_idx, test_idx, val_idx = load_model('siamese_face_verification_shades.keras')
+
+    # Get training paths and identities
+    train_paths = [image_paths[i] for i in train_idx]
+    train_identities = [identities[i] for i in train_idx]
 
     # Get validation paths and identities
     val_paths = [image_paths[i] for i in val_idx]
@@ -558,6 +572,9 @@ if __name__ == "__main__":
 
     # Then use this threshold in your evaluation function (gets overall accuracy of all available data being training, val, and test)
     evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+ 
+    # Use threshold to evaluate overall accuracy of training set
+    # evaluation_metrics = evaluate_siamese_network(model, train_paths, train_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
 
     # Get the test paths and identities
     test_paths = [image_paths[i] for i in test_idx]
@@ -577,10 +594,10 @@ if __name__ == "__main__":
     # Call the function to plot and save the metrics histogram to the 'experiments' folder
     # Shows metrics for all 1, 3, and 5 desired_positive_pairs in one plot
     # plot_metrics_histogram_multiple(metrics_list, desired_positive_pairs, save_folder='experiments')
-    print_metrics_table(test_metrics, desired_positive_pairs, save_folder='experiments')
+    # print_metrics_table(test_metrics, desired_positive_pairs, save_folder='experiments')
 
     # Save the model
-    # model.save('siamese_face_verification.h5')
+    model.save('siamese_face_verification_shades3.keras')
 
 # Things to do for the future...
 

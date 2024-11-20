@@ -27,7 +27,7 @@ from visualizations import plot_metrics_histogram, plot_model_performance1, plot
 
 
 image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path if using different folder
-csv_path = image_directory + "labels_dataset.csv" # change depending on dataset you want to use.
+csv_path = image_directory + "labels_dataset_orientations.csv" # change depending on dataset you want to use.
 
 # Data preparation
 def load_and_preprocess_image(image_path):

@@ -9,6 +9,7 @@
 # cd /my-repo/preprocessing
 # pip install tensorflow==2.17.1
 # pip install opencv-python-headless
+# pip install matplotlib
 # python luke_siamese.py
 
 import tensorflow as tf
@@ -22,7 +23,7 @@ from sklearn.model_selection import train_test_split
 import cv2
 from collections import defaultdict
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix, roc_curve, auc
-from visualizations import plot_model_performance2
+from visualizations import plot_metrics_histogram, plot_model_performance1, plot_metrics_histogram_multiple, print_metrics_table, save_metrics_to_csv
 
 
 image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path if using different folder
@@ -123,29 +124,34 @@ def create_pairs(image_paths, identities, positive_pairs_per_person=1, seed=None
     
     return pairs, labels
 
-def create_base_network(model_name):
-    """Create the base network using the specified model (ResNet50 or VGG19)"""
-    if model_name == 'ResNet50':
-        base_model = ResNet50(weights='imagenet', include_top=False, pooling='avg')
-    elif model_name == 'VGG19':
-        base_model = VGG19(weights='imagenet', include_top=False, pooling='avg')
-    else:
-        raise ValueError("Model name not recognized. Use 'ResNet50' or 'VGG19'.")
-
+def create_base_network():
+    """Create the base network using VGG16"""
+    base_model = VGG16(weights='imagenet', include_top=False, pooling='avg')
+    # should be able to use global pooling average, reduces spatial information to a single vector
+    # lose some info, but then takes a lot fewer parameters
+    
+    # First, freeze all layers
     for layer in base_model.layers:
         layer.trainable = False
-
+    
+    # Add custom layers for facial verification
     x = base_model.output
+
+    # may need to add the extra layers back or something... 
+
+    # Single larger dense block (could remove this as well and only have one dense block)
+    x = Dense(512)(x) # 512 neurons
+    x = tf.keras.layers.BatchNormalization()(x) # normalizes activations of neurons
+    x = tf.keras.layers.ReLU()(x) # activation function
+    # removed dropout for now, could add back later in the future
+    # x = tf.keras.layers.Dropout(0.2)(x) # randomly drops 20% of connections to prevent overfitting, helps generalization
+    
+    # Final embedding
     x = Dense(512)(x)
     x = tf.keras.layers.BatchNormalization()(x)
     x = tf.keras.layers.ReLU()(x)
-
-    x = Dense(512)(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.ReLU()(x)
-
+    
     return Model(inputs=base_model.input, outputs=x)
-
 
 def euclidean_distance(vectors):
     """Compute euclidean distance between vectors"""
@@ -181,11 +187,11 @@ def contrastive_loss(margin=1.0): # Can play around with this and change it, cou
 
     return loss
 
-def create_siamese_network(model_name):
+def create_siamese_network():
     """Create the complete siamese network"""
     input_shape = (224, 224, 3) # 224x224, and 3 channels being RGB
     
-    base_network = create_base_network(model_name)
+    base_network = create_base_network()
     
     input_a = Input(shape=input_shape) # first image in pair
     input_b = Input(shape=input_shape) # second image in pair
@@ -207,7 +213,7 @@ def create_siamese_network(model_name):
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
 
-def train_model(image_paths, identities, model_name, epochs=20, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
+def train_model(image_paths, identities, epochs=20, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None):
     """Train the siamese network with separate training, validation, and test sets
     
     Args:
@@ -253,7 +259,7 @@ def train_model(image_paths, identities, model_name, epochs=20, batch_size=32, l
     val_pairs, val_labels = create_pairs(val_paths, val_identities, 
                                        positive_pairs_per_person, seed=seed)
     
-    model = create_siamese_network(model_name)
+    model = create_siamese_network()
 
     # Could find out somehow to tweak the accuracy... Pretty sure it falls under here...
     model.compile(
@@ -279,7 +285,7 @@ def train_model(image_paths, identities, model_name, epochs=20, batch_size=32, l
         epochs=epochs
     )
     
-    return model, history, test_idx, val_idx
+    return model, history, train_idx, test_idx, val_idx
 
 # calculates optimal threshold to maximize accuracy
 def find_optimal_threshold(model, image_paths, identities, positive_pairs_per_person=1, num_thresholds=100):
@@ -538,42 +544,57 @@ if __name__ == "__main__":
     # Set params for the model
     desired_positive_pairs = 5 # selects three positive (and consequentially three negative) pairs per person, can change later
     random_seed = 42 # randomness seed to use. This selects the pairing of images used in the training and test sets
-    
-    model_names = ['ResNet50', 'VGG19']
-    histories = []
-    test_accuracies = []
+    architecture = 'ResNet50'
 
-    for model_name in model_names:
+    # Train the model
+    model, history, train_idx, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
 
-        # Train the model
-        model, history, test_idx, val_idx = train_model(image_paths, identities, model_name, positive_pairs_per_person=desired_positive_pairs, seed=random_seed)
-        histories.append(history)
+    # Get training paths and identities
+    train_paths = [image_paths[i] for i in train_idx]
+    train_identities = [identities[i] for i in train_idx]
 
-        # Get validation paths and identities
-        val_paths = [image_paths[i] for i in val_idx]
-        val_identities = [identities[i] for i in val_idx]
+    # Get validation paths and identities
+    val_paths = [image_paths[i] for i in val_idx]
+    val_identities = [identities[i] for i in val_idx]
 
-        # Get the optimal threshold, which is the highest accuracy based on the validation set
-        optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, val_paths, val_identities, positive_pairs_per_person=desired_positive_pairs)
+    # Get the optimal threshold, which is the highest accuracy based on the validation set
+    optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, val_paths, val_identities, positive_pairs_per_person=desired_positive_pairs)
 
-        # Then use this threshold in your evaluation function (gets overall accuracy of all available data being training, val, and test)
-        evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+    # Then use this threshold in your evaluation function (gets overall accuracy of all available data being training, val, and test)
+    # evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
 
-        # Get the test paths and identities
-        test_paths = [image_paths[i] for i in test_idx]
-        test_identities = [identities[i] for i in test_idx]
+    # Use threshold to evaluate overall accuracy of training set
+    print("Evaluate Training data")
+    train_metrics = evaluate_siamese_network(model, train_paths, train_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
 
-        # Run model with optimal threshold on the never-before-seen test set
-        test_metrics = evaluate_test_set(model, test_paths, test_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
-        
-        test_accuracies.append(test_metrics['accuracy'])
+    print("Evaluate Validation data")
+    # Use threshold to evaluate overall accuracy of validation set
+    val_metrics = evaluate_siamese_network(model, val_paths, val_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+ 
+    # Get the test paths and identities
+    test_paths = [image_paths[i] for i in test_idx]
+    test_identities = [identities[i] for i in test_idx]
 
-    plot_model_performance2(histories, model_names, test_accuracies, save_folder='experiments')
+    # Run model with optimal threshold on the never-before-seen test set
+    test_metrics = evaluate_test_set(model, test_paths, test_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+
+    save_metrics_to_csv(train_metrics, val_metrics, test_metrics)
+
+    # Generates a performance chart only for one model
+    # See luke_siamese_model_performance_exp for function that generates performance chart for ResNet50 and VGG19, 
+    # There were too many changes to be able to do that so I decided to have a file separate from the main one for now
+    # plot_model_performance1(history, architecture, test_metrics['accuracy'], save_folder='experiments')
+
     # Call the function to plot and save the metrics histogram to the 'experiments' folder
     # plot_metrics_histogram(test_metrics, desired_positive_pairs, save_folder='experiments')
 
+    # Call the function to plot and save the metrics histogram to the 'experiments' folder
+    # Shows metrics for all 1, 3, and 5 desired_positive_pairs in one plot
+    # plot_metrics_histogram_multiple(metrics_list, desired_positive_pairs, save_folder='experiments')
+    # print_metrics_table(test_metrics, desired_positive_pairs, save_folder='experiments')
+
     # Save the model
-    # model.save('siamese_face_verification.h5')
+    model.save('siamese_face_verification.h5')
 
 # Things to do for the future...
 
@@ -585,3 +606,8 @@ if __name__ == "__main__":
 # make sure that training is acutally doing something!!!
 
 # do not display GUI, save as png/jpg in separate folder. Start saving model as well.
+
+
+
+
+

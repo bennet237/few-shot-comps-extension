@@ -122,9 +122,6 @@ def plot_metrics_histogram_multiple(metrics_list, positive_pair_counts, save_fol
     
     plt.show()
 
-
-
-
 # Generates performance chart only for a single model at a time
 # Only to be called in the luke_siamese.py code
 def plot_model_performance1(history, model_name, test_accuracy=None, save_folder='experiments', filename=None):
@@ -242,7 +239,7 @@ def print_metrics_table(metrics, positive_pair_count, save_folder="experiments",
     df = pd.DataFrame(data)
     
     # Print the table with a title
-    print("No Shades")
+    print("Orientations Only")
     print(df.to_string(index=False))
     
     # Ensure the filename is set if not provided
@@ -259,4 +256,55 @@ def print_metrics_table(metrics, positive_pair_count, save_folder="experiments",
 # print_metrics_table(metrics, positive_pair_count)
 
 
+def save_metrics_to_csv(train_metrics, val_metrics, test_metrics, save_folder='experiments', filename='VGG19_metrics_summary.csv'):
+    """
+    Save train, validation, and test metrics in a single CSV file.
 
+    Args:
+        train_metrics: Dictionary containing train metrics.
+        val_metrics: Dictionary containing validation metrics.
+        test_metrics: Dictionary containing test metrics.
+        save_folder: Folder where the CSV will be saved.
+        filename: Name of the CSV file to be saved.
+    """
+    # Create a DataFrame from the metrics lists
+    data = {
+        'Metric': ['Precision (Class 1)', 'Recall (Class 1)', 'F1-Score (Class 1)',
+                   'Precision (Class 0)', 'Recall (Class 0)', 'F1-Score (Class 0)'],
+        'Train': [
+            train_metrics['precision'][1], train_metrics['recall'][1], train_metrics['f1'][1],
+            train_metrics['precision'][0], train_metrics['recall'][0], train_metrics['f1'][0]
+        ],
+        'Validation': [
+            val_metrics['precision'][1], val_metrics['recall'][1], val_metrics['f1'][1],
+            val_metrics['precision'][0], val_metrics['recall'][0], val_metrics['f1'][0]
+        ],
+        'Test': [
+            test_metrics['precision'][1], test_metrics['recall'][1], test_metrics['f1'][1],
+            test_metrics['precision'][0], test_metrics['recall'][0], test_metrics['f1'][0]
+        ]
+    }
+
+    # Add accuracy and AUC metrics for the test set only
+    additional_test_metrics = {
+        'Metric': ['Accuracy', 'AUC'],
+        'Train': [None, None],  # No values for train metrics
+        'Validation': [None, None],  # No values for validation metrics
+        'Test': [test_metrics['accuracy'], test_metrics['auc']]
+    }
+
+    # Convert both dictionaries to DataFrames
+    df_main = pd.DataFrame(data)
+    df_additional = pd.DataFrame(additional_test_metrics)
+
+    # Concatenate the DataFrames
+    df = pd.concat([df_main, df_additional], ignore_index=True)
+    
+    # Save the DataFrame as a CSV file
+    csv_path = f"{save_folder}/{filename}"
+    df.to_csv(csv_path, index=False)
+
+    print(f"Metrics for Train, Validation, and Test saved to {csv_path}")
+
+# Usage example:
+# save_metrics_to_csv(train_metrics, val_metrics, test_metrics)
