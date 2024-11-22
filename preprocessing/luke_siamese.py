@@ -13,9 +13,9 @@
 # python luke_siamese.py
 
 import tensorflow as tf
+import keras
 import numpy as np
 import csv
-from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import ResNet50, VGG19
 from tensorflow.keras.layers import Dense, Input, Lambda
 from tensorflow.keras.models import Model
@@ -28,7 +28,7 @@ from visualizations import print_metrics_table
 
 
 image_directory = "TuftsFaces/Sets1-4_preprocessed/" # update this with appropriate path if using different folder
-csv_path = image_directory + "labels_dataset_shades.csv" # change depending on dataset you want to use.
+csv_path = image_directory + "labels_dataset_no_shades.csv" # change depending on dataset you want to use.
 
 # Data preparation
 def load_and_preprocess_image(image_path):
@@ -162,7 +162,7 @@ def create_base_network(architecture="ResNet50"):
     
     return Model(inputs=base_model.input, outputs=x)
 
-@tf.keras.saving.register_keras_serializable()
+@keras.saving.register_keras_serializable()
 def euclidean_distance(vectors):
     """Compute euclidean distance between vectors"""
     # x = first set of embeddings
@@ -223,7 +223,7 @@ def create_siamese_network(architecture="ResNet50"):
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
 
-def train_model(image_paths, identities, epochs=20, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None, architecture="ResNet50"):
+def train_model(image_paths, identities, epochs=3, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None, architecture="ResNet50"):
     """Train the siamese network with separate training, validation, and test sets
     
     Args:
@@ -562,7 +562,7 @@ if __name__ == "__main__":
     architecture = 'VGG19' # either "ResNet50" or "VGG19". If one of these is not entered, then it will throw an error.
 
     # Train the model
-    model, history, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed, architecture=architecture)
+    model, history, train_idx, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed, architecture=architecture)
 
     # Get validation paths and identities
     val_paths = [image_paths[i] for i in val_idx]
@@ -586,9 +586,12 @@ if __name__ == "__main__":
     
     # Shows metrics for all 1, 3, and 5 desired_positive_pairs in one plot
     # print_metrics_table(test_metrics, desired_positive_pairs, save_folder='experiments')
+    
+    print("Attempting to save the model now...")
 
     # Save the model
-    model.save('siamese_face_verification_shades3.keras')
+    model.save('saved_models/siamese_face_verification_testing.keras')
+    print("Successfully saved model!")
 
 # Things to do for the future...
 
