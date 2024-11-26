@@ -8,7 +8,7 @@ from tensorflow.keras.optimizers import Adam
 ARCHITECTURE = "VGG19"  # or "ResNet50"
 
 # what you use to load the weights. make sure you're using the same arhictecture that the model was trained on
-MODEL_PATH = "saved_models/siamese_face_verification_testing.keras"
+MODEL_PATH = "saved_models/generated_model.keras"
 
 # Define the required custom functions so that the model can be loaded properly
 # these are the same functions for when the model was initialzied in luke_siamese.py

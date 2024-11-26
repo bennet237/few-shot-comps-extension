@@ -1,7 +1,3 @@
-# luke's attempt at a siamese model
-# will try implementing it off of some different source code
-# also will code parts of it from scratch
-
 # dataset info: 112 people, 4 images per person
 # (Could get more images, removed sunglasses)
 
@@ -146,13 +142,11 @@ def create_base_network(architecture="ResNet50"):
     # Add custom layers for facial verification
     x = base_model.output
 
-    # may need to add the extra layers back or something... 
-
     # Single larger dense block (could remove this as well and only have one dense block)
     x = Dense(512)(x) # 512 neurons
     x = tf.keras.layers.BatchNormalization()(x) # normalizes activations of neurons
     x = tf.keras.layers.ReLU()(x) # activation function
-    # removed dropout for now, could add back later in the future
+    # removed dropout in current state, if tweaking model in future, could add it back in some capacity
     # x = tf.keras.layers.Dropout(0.2)(x) # randomly drops 20% of connections to prevent overfitting, helps generalization
     
     # Final embedding
@@ -223,7 +217,7 @@ def create_siamese_network(architecture="ResNet50"):
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
 
-def train_model(image_paths, identities, epochs=3, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None, architecture="ResNet50"):
+def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None, architecture="ResNet50"):
     """Train the siamese network with separate training, validation, and test sets
     
     Args:
@@ -277,9 +271,6 @@ def train_model(image_paths, identities, epochs=3, batch_size=32, learning_rate=
         optimizer=Adam(learning_rate=learning_rate), # will likely still have to use learning rate decay, not built in...
         metrics=["accuracy", "precision", "recall"]
     )
-
-    # contrastive loss seems to be better than binary-cross entropy for this task of computing image distance
-    # model.compile(loss="binary_crossentropy", optimizer="adam", metrics=["accuracy", "precision", "recall"])
     
     # separates first and second images from each pair, then loads in preprocessed images
     train_pairs_0 = np.array([load_and_preprocess_image(img) for img in train_pairs[:, 0]])
@@ -561,6 +552,8 @@ if __name__ == "__main__":
     random_seed = 42 # randomness seed to use. This selects the pairing of images used in the training and test sets
     architecture = 'VGG19' # either "ResNet50" or "VGG19". If one of these is not entered, then it will throw an error.
 
+    # can additionally modify other aspects of the model like number of epochs by directly manipulating the train_model inputs
+
     # Train the model
     model, history, train_idx, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed, architecture=architecture)
 
@@ -590,12 +583,6 @@ if __name__ == "__main__":
     print("Attempting to save the model now...")
 
     # Save the model
-    model.save('saved_models/siamese_face_verification_testing.keras')
+    model.save('saved_models/generated_model.keras')
     print("Successfully saved model!")
 
-# Things to do for the future...
-
-# in test, look at what it is getting right, and what it is getting wrong (specific individuals)
-# could create histogram images, showing average distances between different and same individuals
-# look at the before training and after training statistics (get values before and after)
-# make sure that training is acutally doing something!!!
