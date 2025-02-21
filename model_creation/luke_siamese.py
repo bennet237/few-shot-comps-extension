@@ -220,6 +220,49 @@ def contrastive_loss(margin=1.0): # Can play around with this and change it, cou
 
     return loss
 
+# Triplet Loss Function
+def triplet_loss(margin=0.5):  # Reduced margin for normalized distances. Can play around with this and change it, could go smaller potentially, MODIFY THIS VAL IN TRAIN_MODEL
+    """Define an external triplet loss function."""
+    def loss(y_true, y_pred):
+        # Split the predicted distances
+        pos_dist, neg_dist = tf.split(y_pred, num_or_size_splits=2, axis=1)
+        # Compute triplet loss: max(pos_dist - neg_dist + margin, 0)
+        basic_loss = pos_dist - neg_dist + margin
+        return tf.reduce_mean(tf.maximum(basic_loss, 0.0))
+    return loss
+
+# Triplet Network with Distance Output
+def create_triplet_network(architecture="ResNet50"):
+    """Create a triplet network that outputs distances for an external loss function."""
+    input_shape = (224, 224, 3)
+    base_network = create_base_network(architecture)
+    
+    # Define inputs
+    anchor_input = Input(shape=input_shape, name='anchor_input')
+    positive_input = Input(shape=input_shape, name='positive_input')
+    negative_input = Input(shape=input_shape, name='negative_input')
+    
+    # Generate embeddings
+    anchor_embedding = base_network(anchor_input)
+    positive_embedding = base_network(positive_input)
+    negative_embedding = base_network(negative_input)
+    
+    # Normalize embeddings
+    anchor_embedding = Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(anchor_embedding)
+    positive_embedding = Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(positive_embedding)
+    negative_embedding = Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(negative_embedding)
+
+
+    # Compute Euclidean distances using the custom function
+    pos_dist = Lambda(euclidean_distance)([anchor_embedding, positive_embedding])
+    neg_dist = Lambda(euclidean_distance)([anchor_embedding, negative_embedding])
+    
+    # Output distances as a single tensor
+    distances = tf.concat([pos_dist, neg_dist], axis=1)
+    
+    model = Model(inputs=[anchor_input, positive_input, negative_input], outputs=distances)
+    return model, base_network
+
 def create_siamese_network(architecture="ResNet50"):
     """Create the complete siamese network"""
     input_shape = (224, 224, 3) # 224x224, and 3 channels being RGB
