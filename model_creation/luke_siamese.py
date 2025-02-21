@@ -121,6 +121,35 @@ def create_pairs(image_paths, identities, positive_pairs_per_person=1, seed=None
     
     return pairs, labels
 
+# Triplet Creation
+def create_triplets(image_paths, identities, triplets_per_person=1, seed=None):
+    """Generate triplets (anchor, positive, negative) for triplet loss training."""
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # Group images by identity
+    identity_to_images = defaultdict(list)
+    for path, identity in zip(image_paths, identities):
+        identity_to_images[identity].append(path)
+    
+    triplets = []
+    for identity, paths in identity_to_images.items():
+        if len(paths) < 2:  # Need at least 2 images to create an anchor and positive
+            continue
+        for _ in range(triplets_per_person):
+            anchor = np.random.choice(paths)
+            positive_candidates = [p for p in paths if p != anchor]
+            if not positive_candidates:
+                continue
+            positive = np.random.choice(positive_candidates)
+            negative_identity = np.random.choice([id for id in identity_to_images.keys() if id != identity])
+            negative = np.random.choice(identity_to_images[negative_identity])
+            triplets.append([anchor, positive, negative])
+    
+    triplets = np.array(triplets)
+    np.random.shuffle(triplets)
+    return triplets
+
 def create_base_network(architecture="ResNet50"):
     """Create the base network using selected architecture"""
     if architecture == "VGG19":
