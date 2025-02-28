@@ -136,7 +136,7 @@ def create_triplets(image_paths, identities, triplets_per_person=1, seed=None):
     for identity, paths in identity_to_images.items():
         if len(paths) < 2:  # Need at least 2 images to create an anchor and positive
             continue
-        for _ in range(triplets_per_person):
+        for t in range(triplets_per_person):
             anchor = np.random.choice(paths)
             positive_candidates = [p for p in paths if p != anchor]
             if not positive_candidates:
@@ -147,7 +147,7 @@ def create_triplets(image_paths, identities, triplets_per_person=1, seed=None):
             triplets.append([anchor, positive, negative])
     
     triplets = np.array(triplets)
-    np.random.shuffle(triplets)
+    np.random.shuffle(triplets) # check to see if it shuffles in place or return a shuffled copy
     return triplets
 
 def create_base_network(architecture="ResNet50"):
@@ -225,10 +225,10 @@ def triplet_loss(margin=0.5):  # Reduced margin for normalized distances. Can pl
     """Define an external triplet loss function."""
     def loss(y_true, y_pred):
         # Split the predicted distances
-        pos_dist, neg_dist = tf.split(y_pred, num_or_size_splits=2, axis=1)
+        pos_dist, neg_dist = tf.split(y_pred, num_or_size_splits=2, axis=1) #just try using array access 
         # Compute triplet loss: max(pos_dist - neg_dist + margin, 0)
         basic_loss = pos_dist - neg_dist + margin
-        return tf.reduce_mean(tf.maximum(basic_loss, 0.0))
+        return tf.reduce_mean(tf.maximum(basic_loss, 0.0)) #figure out what reduce mean does. do you actually need it here?
     return loss
 
 # Triplet Network with Distance Output
@@ -288,6 +288,94 @@ def create_siamese_network(architecture="ResNet50"):
 # Created network works as follows 
 # distance = model([person1_img1, person1_img2])  # Small distance (same person)
 # distance = model([person1_img1, person2_img1])  # Large distance (different people)
+
+def train_model_triplets(image_paths, identities, epochs=10, batch_size=32, learning_rate=1e-5, triplets_per_person=1, seed=None, architecture="ResNet50"):
+    """Train the siamese network with separate training, validation, and test sets
+    
+    Args:
+        image_paths: List of image paths
+        identities: List of corresponding identities
+        epochs: Number of training epochs
+        batch_size: Batch size for training
+        learning_rate: Learning rate for optimizer
+        triplets_per_person: Number of triplets per person
+                                if no triplets variable given, sets it to one
+        seed: Random seed for reproducibility
+    """
+
+    # First split: 70% train, 30% remaining
+    train_idx, remaining_idx = train_test_split(
+        np.arange(len(image_paths)),
+        test_size=0.3,
+        shuffle=True,
+        random_state=seed
+    )
+
+    # Second split: Split remaining 30% into validation (15%) and test (15%)
+    # Since we want equal sizes, use test_size=0.5 to split the remaining data
+    val_idx, test_idx = train_test_split(
+        remaining_idx,
+        test_size=0.5,
+        shuffle=True,
+        random_state=seed
+    )
+
+    # Create the three datasets
+    train_paths = [image_paths[i] for i in train_idx]
+    train_identities = [identities[i] for i in train_idx]
+    
+    val_paths = [image_paths[i] for i in val_idx]
+    val_identities = [identities[i] for i in val_idx]
+    
+    # No need to create test_paths and test_identities here since they're not used
+    
+    # Create triplets
+    train_triplets = create_triplets(train_paths, train_identities, triplets_per_person, seed)
+    val_triplets = create_triplets(val_paths, val_identities, triplets_per_person, seed)
+    
+    # Build triplet model
+    triplet_model, base_network = create_triplet_network(architecture)
+    
+    # Compile with external loss
+    triplet_model.compile(
+        loss=triplet_loss(margin=0.5),
+        optimizer=Adam(learning_rate=learning_rate),
+    )
+    
+    # Preparing training data
+    train_anchor = np.array([load_and_preprocess_image(t[0]) for t in train_triplets])
+    train_positive = np.array([load_and_preprocess_image(t[1]) for t in train_triplets])
+    train_negative = np.array([load_and_preprocess_image(t[2]) for t in train_triplets])
+    
+    val_anchor = np.array([load_and_preprocess_image(t[0]) for t in val_triplets])
+    val_positive = np.array([load_and_preprocess_image(t[1]) for t in val_triplets])
+    val_negative = np.array([load_and_preprocess_image(t[2]) for t in val_triplets])
+    
+    # Dummy labels (shape matches output: (batch_size, 2))
+    train_labels = np.zeros((len(train_triplets), 2))
+    val_labels = np.zeros((len(val_triplets), 2))
+    
+    # Train the model
+    history = triplet_model.fit(
+        [train_anchor, train_positive, train_negative], train_labels,
+        validation_data=([val_anchor, val_positive, val_negative], val_labels),
+        batch_size=batch_size,
+        epochs=epochs
+    )
+    
+    # Build Siamese model for evaluation
+    input_a = Input(shape=(224, 224, 3))
+    input_b = Input(shape=(224, 224, 3))
+    processed_a = base_network(input_a)
+    processed_b = base_network(input_b)
+
+    processed_a = Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_a)
+    processed_b = Lambda(lambda x: tf.math.l2_normalize(x, axis=1))(processed_b)
+
+    distance = Lambda(euclidean_distance)([processed_a, processed_b])
+    siamese_model = Model(inputs=[input_a, input_b], outputs=distance)
+    
+    return siamese_model, history, train_idx, test_idx, val_idx
 
 def train_model(image_paths, identities, epochs=10, batch_size=32, learning_rate=1e-5, positive_pairs_per_person=1, seed=None, architecture="ResNet50"):
     """Train the siamese network with separate training, validation, and test sets
@@ -620,24 +708,24 @@ if __name__ == "__main__":
     image_paths, identities = read_csv_data(csv_path)
     
     # Set params for the model
-    desired_positive_pairs = 5 # selects three positive (and consequentially three negative) pairs per person, can change later
+    desired_triplets = 5 # selects three positive (and consequentially three negative) pairs per person, can change later
     random_seed = 42 # randomness seed to use. This selects the pairing of images used in the training and test sets
     architecture = 'VGG19' # either "ResNet50" or "VGG19". If one of these is not entered, then it will throw an error.
 
     # can additionally modify other aspects of the model like number of epochs by directly manipulating the train_model inputs
 
     # Train the model
-    model, history, train_idx, test_idx, val_idx = train_model(image_paths, identities, positive_pairs_per_person=desired_positive_pairs, seed=random_seed, architecture=architecture)
+    model, history, train_idx, test_idx, val_idx = train_model_triplets(image_paths, identities, triplets_per_person=desired_triplets, seed=random_seed, architecture=architecture)
 
     # Get validation paths and identities
     val_paths = [image_paths[i] for i in val_idx]
     val_identities = [identities[i] for i in val_idx]
 
     # Get the optimal threshold, which is the highest accuracy based on the validation set
-    optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, val_paths, val_identities, positive_pairs_per_person=desired_positive_pairs)
+    optimal_threshold, best_accuracy, metrics = find_optimal_threshold(model, val_paths, val_identities, positive_pairs_per_person=desired_triplets)
 
     # Then use this threshold in your evaluation function (gets overall accuracy of all available data being training, val, and test)
-    evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+    evaluation_metrics = evaluate_siamese_network(model, image_paths, identities, threshold=optimal_threshold, positive_pairs_per_person=desired_triplets)
  
     # Use threshold to evaluate overall accuracy of training set
     # evaluation_metrics = evaluate_siamese_network(model, train_paths, train_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
@@ -647,7 +735,7 @@ if __name__ == "__main__":
     test_identities = [identities[i] for i in test_idx]
 
     # Run model with optimal threshold on the never-before-seen test set
-    test_metrics = evaluate_test_set(model, test_paths, test_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_positive_pairs)
+    test_metrics = evaluate_test_set(model, test_paths, test_identities, threshold=optimal_threshold, positive_pairs_per_person=desired_triplets)
     
     # Shows metrics for all 1, 3, and 5 desired_positive_pairs in one plot
     # print_metrics_table(test_metrics, desired_positive_pairs, save_folder='experiments')
